@@ -2,9 +2,8 @@
 node_modules/
 .pnpm-store/
 
-# build
+# build — anchored at any depth is fine, "dist" isn't a valid source dir name
 dist/
-build/
 *.tsbuildinfo
 
 # env + secrets
@@ -12,15 +11,19 @@ build/
 .env.local
 .env.*.local
 
-# runtime state
-data/
+# runtime state — anchored to repo root only (don't match src/data, src/logs)
+/data/
+/logs/
 *.sqlite
 *.sqlite-journal
 *.log
-logs/
 
-# cloned vault (backend clones here at runtime)
+# cloned vault (backend clones here at runtime). Match any dir named "vault"
+# at any depth, but re-include the source-code directory so its .ts files
+# stay tracked.
 vault/
+!apps/backend/src/vault/
+!apps/backend/src/vault/**
 
 # os
 .DS_Store

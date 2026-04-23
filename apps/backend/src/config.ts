@@ -5,7 +5,11 @@ const ConfigSchema = z.object({
   anthropic: z.object({
     apiKey: z.string().min(1, "ANTHROPIC_API_KEY is required"),
     models: z.object({
-      routine: z.string().default("claude-haiku-4-5"),
+      // Routine = Chief of Staff router. Sonnet 4.6 over Haiku 4.5 because:
+      // (1) better tool-use routing, (2) prompt caching activates on prompts
+      // >= 2048 tokens (Haiku requires >= 4096) so the cost gap collapses
+      // after the first request in a cache window.
+      routine: z.string().default("claude-sonnet-4-6"),
       brief: z.string().default("claude-sonnet-4-6"),
       strategic: z.string().default("claude-opus-4-7"),
     }),

@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && pnpm build:assets",
+    "build:assets": "mkdir -p dist/agents && cp -R src/agents/prompts dist/agents/prompts && mkdir -p dist/db && cp src/db/schema.sql dist/db/schema.sql",
     "cli": "tsx src/intake/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

@@ -12,7 +12,9 @@
     "cli": "pnpm --filter backend cli",
     "typecheck": "pnpm --filter backend typecheck",
     "test": "pnpm --filter backend test",
-    "bootstrap-vault": "pnpm --filter backend bootstrap-vault"
+    "bootstrap-vault": "pnpm --filter backend bootstrap-vault",
+    "brief:daily": "pnpm --filter backend brief:daily",
+    "brief:weekly": "pnpm --filter backend brief:weekly"
   },
   "engines": {
     "node": ">=20"
