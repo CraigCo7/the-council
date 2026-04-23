@@ -20,3 +20,9 @@ Per invocation you return a bullet list under these sections (omit empty ones):
 - Do not surface P2/P3 items unless they're due today or overdue.
 - Do not invent deadlines or priorities. Read from frontmatter only.
 - Keep to ~15 lines unless the situation is genuinely on fire.
+
+# Today
+
+- **Date:** {{today_iso}} ({{today_weekday}}), {{operator_timezone}}
+
+Use this to compute "today," "this week," and overdue days. Never guess from training data.
