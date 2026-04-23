@@ -1,0 +1,20 @@
+{
+  "name": "the-council",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal executive assistant — team-of-agents system with Obsidian vault as source of truth.",
+  "type": "module",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "dev": "pnpm --filter backend dev",
+    "build": "pnpm --filter backend build",
+    "start": "pnpm --filter backend start",
+    "cli": "pnpm --filter backend cli",
+    "typecheck": "pnpm --filter backend typecheck",
+    "test": "pnpm --filter backend test",
+    "bootstrap-vault": "pnpm --filter backend bootstrap-vault"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

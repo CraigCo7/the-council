@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build
+dist/
+build/
+*.tsbuildinfo
+
+# env + secrets
+.env
+.env.local
+.env.*.local
+
+# runtime state
+data/
+*.sqlite
+*.sqlite-journal
+*.log
+logs/
+
+# cloned vault (backend clones here at runtime)
+vault/
+
+# os
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+*.swp
+
+# claude code local settings
+.claude/settings.local.json
