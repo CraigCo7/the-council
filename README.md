@@ -5,7 +5,7 @@ Personal executive-assistant / team-of-agents system for Craig.
 - **Vault is source of truth.** All state — tasks, decisions, briefs — lives as markdown in a Git-backed Obsidian vault.
 - **Chief of Staff routes; specialists execute.** Task Operator, Strategic Analyst, Intelligence Monitor, Vault Manager.
 - **Cloud-deployed.** Works when your laptop is closed; interacts via WhatsApp (phase 3) or HTTP.
-- **Cost-conscious.** Tiered models: Haiku routine, Sonnet briefs, Opus weekly review + strategic pressure-testing.
+- **Cost-conscious.** Tiered models: Sonnet 4.6 for Chief of Staff routing + daily briefs (prompt caching drops per-turn cost ~10x after warmup); Opus 4.7 with adaptive thinking for weekly review + strategic pressure-testing.
 
 ## Stack
 
@@ -123,6 +123,10 @@ the-council/
 - ✅ Cron jobs scheduled in the operator's timezone.
 - ✅ HTTP intake endpoint (token-auth).
 - ✅ WhatsApp stub ready for Phase 3.
+
+## Deploy
+
+Fly.io, always-on, persistent volume for vault + SQLite. End-to-end setup in **[docs/DEPLOY.md](docs/DEPLOY.md)** — ~10 minutes from zero.
 
 ## What's next
 
