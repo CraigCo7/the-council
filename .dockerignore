@@ -1,0 +1,37 @@
+# Dev artifacts — never in the image
+**/node_modules
+**/dist
+**/.env
+**/.env.local
+**/*.log
+
+# Local runtime state (only exists on dev machine)
+/data
+/logs
+/vault
+/apps/backend/data
+/apps/backend/logs
+/apps/backend/vault
+
+# Git + meta
+.git
+.github
+.gitignore
+.dockerignore
+
+# Editors / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docs — don't need them in the container
+/docs
+*.md
+!README.md
+
+# The vault seed template — only used by bootstrap, never at runtime
+/vault-template
+
+# Scripts that aren't needed in the runtime image
+/scripts

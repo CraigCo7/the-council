@@ -1,0 +1,64 @@
+# fly.toml — The Council
+#
+# Always-on shared-cpu VM in Hong Kong (closest Fly region to Manila). A
+# persistent 3 GB volume at /data holds the cloned vault repo and the SQLite
+# state. Cron fires in-process via node-cron, so auto_stop is OFF and we
+# keep at least one machine running.
+#
+# Secrets (set with `fly secrets set KEY=...`, NOT in this file):
+#   ANTHROPIC_API_KEY, INTAKE_TOKEN, VAULT_REMOTE
+#
+# See docs/DEPLOY.md for the full setup sequence.
+
+app = "the-council"
+primary_region = "hkg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Non-secret defaults. Any of these can be overridden with `fly secrets set`.
+[env]
+  NODE_ENV = "production"
+  HOST = "0.0.0.0"
+  PORT = "8080"
+  VAULT_PATH = "/data/vault"
+  DB_PATH = "/data/council.sqlite"
+  VAULT_BRANCH = "main"
+  VAULT_GIT_USER_NAME = "The Council"
+  VAULT_GIT_USER_EMAIL = "council-bot@users.noreply.github.com"
+  OPERATOR_NAME = "Craig"
+  OPERATOR_TIMEZONE = "Asia/Manila"
+  PROJECTS = "BidaWash,Puppery,ATIN,YNG,Personal"
+  MODEL_ROUTINE = "claude-sonnet-4-6"
+  MODEL_BRIEF = "claude-sonnet-4-6"
+  MODEL_STRATEGIC = "claude-opus-4-7"
+  LOG_LEVEL = "info"
+  WHATSAPP_ENABLED = "false"
+  CRON_DAILY_BRIEF = "0 7 * * *"
+  CRON_WEEKLY_REVIEW = "0 18 * * 0"
+  CRON_DEADLINE_SWEEP = "0 * * * *"
+
+# Persistent volume — mounted at /data. Created with `fly volumes create`.
+[[mounts]]
+  source = "council_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Cron fires in-process. If the machine stops, cron does not fire. So:
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
