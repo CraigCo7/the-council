@@ -44,3 +44,13 @@ CREATE TABLE IF NOT EXISTS kv (
   v             TEXT NOT NULL,
   updated_at    TEXT NOT NULL
 );
+
+-- Idempotency for inbound webhooks. Meta retries delivery if it doesn't
+-- get a 200 within seconds; without dedup we'd run the agent loop twice
+-- (or more) on the same message. INSERT OR IGNORE on the external_id PK
+-- gives us a cheap "already processed" check.
+CREATE TABLE IF NOT EXISTS processed_webhook_events (
+  external_id   TEXT PRIMARY KEY,    -- Meta's wamid for the message
+  source        TEXT NOT NULL,       -- 'whatsapp' for now
+  created_at    TEXT NOT NULL
+);

@@ -6,7 +6,26 @@ import { generateWeeklyReview } from "../briefs/weekly.js";
 import { listPending, resolve } from "../approvals/queue.js";
 import { config } from "../config.js";
 import { db } from "../db/sqlite.js";
-import { toLocalISODateTime } from "../vault/time.js";
+import { toLocalISODate, toLocalISODateTime } from "../vault/time.js";
+import { verifyWhatsappSignature } from "../security/whatsapp-hmac.js";
+import {
+  claimMessage,
+  extractInboundMessages,
+  isExpectedSender,
+  processInboundMessage,
+} from "./whatsapp.js";
+import { send } from "../messenger/index.js";
+import { fitForWhatsappBody } from "../messenger/format.js";
+import { logger } from "../logger.js";
+
+// Make the raw request body available on `req.rawBody`. Required for HMAC
+// verification on the WhatsApp webhook — if we re-serialize the parsed JSON,
+// even one whitespace difference invalidates Meta's signature.
+declare module "fastify" {
+  interface FastifyRequest {
+    rawBody?: Buffer;
+  }
+}
 
 const MessageInput = z.object({
   text: z.string().min(1).max(8000),
@@ -15,10 +34,31 @@ const MessageInput = z.object({
 });
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
+  // Replace the default JSON parser with one that retains the raw bytes.
+  // The WhatsApp webhook needs them to verify Meta's HMAC signature.
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer" },
+    (req, body, done) => {
+      const buf = body as Buffer;
+      try {
+        const json = buf.length > 0 ? JSON.parse(buf.toString("utf8")) : {};
+        req.rawBody = buf;
+        done(null, json);
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
   app.addHook("onRequest", async (req, reply) => {
-    // Auth gate for everything except health + WhatsApp verification.
+    // Auth gate for everything except health + WhatsApp webhooks.
+    // - /health: no auth needed (used by Fly's healthcheck).
+    // - /webhooks/whatsapp GET: Meta verification (auth is the verify_token).
+    // - /webhooks/whatsapp POST: Meta delivery (auth is the HMAC signature
+    //   verified inside the handler).
     if (req.url === "/health") return;
-    if (req.url.startsWith("/webhooks/whatsapp") && req.method === "GET") return;
+    if (req.url.startsWith("/webhooks/whatsapp")) return;
 
     const auth = req.headers.authorization ?? "";
     const expected = `Bearer ${config.server.intakeToken}`;
@@ -75,11 +115,23 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/briefs/daily", async () => {
     const brief = await generateDailyBrief();
+    const message = fitForWhatsappBody({
+      header: `Daily brief — ${toLocalISODate()}`,
+      body: brief.body,
+      vaultRel: brief.relPath,
+    });
+    await send(message, "whatsapp");
     return { ok: true, relPath: brief.relPath };
   });
 
   app.post("/briefs/weekly", async () => {
     const review = await generateWeeklyReview();
+    const message = fitForWhatsappBody({
+      header: "Weekly review",
+      body: review.body,
+      vaultRel: review.relPath,
+    });
+    await send(message, "whatsapp");
     return { ok: true, relPath: review.relPath };
   });
 
@@ -99,9 +151,45 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/webhooks/whatsapp", async (req, reply) => {
-    // Phase 3: parse Meta's webhook payload, extract text, dispatch through runChiefOfStaff,
-    // then reply via messenger.send(..., 'whatsapp').
-    req.log.info({ body: req.body }, "whatsapp webhook received (not wired)");
-    return reply.send({ ok: true });
+    // 1. Verify Meta's HMAC signature against the raw body.
+    //    Without this, the endpoint is wide open to any POST request.
+    const sig = req.headers["x-hub-signature-256"];
+    const sigHeader = Array.isArray(sig) ? sig[0] : sig;
+    const rawBody = req.rawBody ?? Buffer.alloc(0);
+    if (!verifyWhatsappSignature(rawBody, sigHeader, config.whatsapp.appSecret)) {
+      logger.warn(
+        { hasSig: Boolean(sigHeader), bodyLen: rawBody.length },
+        "whatsapp webhook signature invalid — rejecting",
+      );
+      return reply.code(403).send();
+    }
+
+    // 2. Acknowledge to Meta IMMEDIATELY. Anything slower than ~5s
+    //    triggers a redelivery, which would re-process the same message
+    //    (idempotency below catches it, but a fast 200 avoids the round-trip).
+    reply.code(200).send({ ok: true });
+
+    // 3. Process out-of-band. Errors here do not affect the response.
+    setImmediate(async () => {
+      try {
+        const messages = extractInboundMessages(req.body);
+        for (const msg of messages) {
+          if (!isExpectedSender(msg.from)) {
+            logger.warn(
+              { wamid: msg.id, fromTail: msg.from.slice(-4) },
+              "whatsapp message from unexpected sender — dropping",
+            );
+            continue;
+          }
+          if (!claimMessage(msg.id)) {
+            logger.info({ wamid: msg.id }, "whatsapp message already processed — skipping");
+            continue;
+          }
+          await processInboundMessage(msg);
+        }
+      } catch (err) {
+        logger.error({ err }, "whatsapp webhook background processing failed");
+      }
+    });
   });
 }
