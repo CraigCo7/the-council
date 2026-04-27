@@ -1,17 +1,19 @@
 # fly.toml — The Council
 #
-# Always-on shared-cpu VM in Hong Kong (closest Fly region to Manila). A
-# persistent 3 GB volume at /data holds the cloned vault repo and the SQLite
-# state. Cron fires in-process via node-cron, so auto_stop is OFF and we
-# keep at least one machine running.
+# Always-on shared-cpu VM in Singapore (closest available Fly region to
+# Manila — `hkg` was suggested originally but is no longer accepting new
+# apps; `sin` is ~30ms further but functionally equivalent). A persistent
+# 3 GB volume at /data holds the cloned vault repo and the SQLite state.
+# Cron fires in-process via node-cron, so auto_stop is OFF and we keep
+# at least one machine running.
 #
 # Secrets (set with `fly secrets set KEY=...`, NOT in this file):
 #   ANTHROPIC_API_KEY, INTAKE_TOKEN, VAULT_REMOTE
 #
 # See docs/DEPLOY.md for the full setup sequence.
 
-app = "the-council"
-primary_region = "hkg"
+app = "the-council-empty-voice-9193"
+primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"

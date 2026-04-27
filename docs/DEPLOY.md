@@ -1,6 +1,6 @@
 # Deploy — Phase 2
 
-Target: [Fly.io](https://fly.io) shared-cpu-1x machine in `hkg` (Hong Kong — closest Fly region to Manila), always-on, with a 3 GB persistent volume at `/data` holding both the cloned vault repo and the SQLite state.
+Target: [Fly.io](https://fly.io) shared-cpu-1x machine in `sin` (Singapore — closest currently-available Fly region to Manila; `hkg` is no longer accepting new apps), always-on, with a 3 GB persistent volume at `/data` holding both the cloned vault repo and the SQLite state.
 
 Cost at this config: **~$2–4/month** (always-on shared-cpu-1x) + Anthropic API usage (~$8–20/month at typical personal load). Free-tier credits ($5/month on new Fly accounts) cover most of the hosting.
 
@@ -27,17 +27,19 @@ These steps run once per project. If you're redeploying after changes, skip to [
 From the repo root:
 
 ```sh
-fly launch --no-deploy --copy-config --name the-council --region hkg
+fly launch --no-deploy --copy-config --region sin
 ```
 
-- `--copy-config` keeps the `fly.toml` that's already in the repo.
+- `--copy-config` keeps the `fly.toml` that's already in the repo (and uses its `app` value as the name).
 - `--no-deploy` waits to actually push the image until secrets + volume exist.
 - Answer **no** to any "would you like to set up a database / Redis / Tigris" prompts. We don't need them.
+
+**App name note**: Fly app names are globally unique across all of Fly. If the `app` value in `fly.toml` is already taken, `fly launch` will auto-generate one like `the-council-empty-voice-9193` and rewrite your local `fly.toml` to match. That's fine — the URL becomes `https://<that-name>.fly.dev` and you reference it via `--app <that-name>` in subsequent commands. If you'd prefer a cleaner name, edit `fly.toml`'s `app` value to something likely-unused (e.g., `<yourhandle>-council`) before running `fly launch`.
 
 ### 2. Create the persistent volume
 
 ```sh
-fly volumes create council_data --size 3 --region hkg
+fly volumes create council_data --size 3 --region sin
 ```
 
 3 GB is plenty — the vault is plain markdown and the SQLite DB stays small.
@@ -84,20 +86,29 @@ Success looks like:
 
 ## Verify
 
-```sh
-# Machine status
-fly status
+Find your app name (visible in `fly.toml`'s `app` field, or via `fly apps list`) and store it for the rest of the session:
 
-# Live logs (Ctrl+C to exit)
-fly logs
+```sh
+APP=<your-fly-app-name>     # e.g. the-council-empty-voice-9193
+INTAKE=<your-intake-token>  # the value you saved from `openssl rand -hex 32`
+```
+
+Then:
+
+```sh
+# Machine status — should show one machine in `started` state with checks passing
+fly status --app $APP
+
+# Live logs (Ctrl+C to exit) — useful to tail while you smoke-test
+fly logs --app $APP
 
 # Healthcheck (no auth required)
-curl https://the-council.fly.dev/health
+curl https://$APP.fly.dev/health
 
 # Full end-to-end check — sends a message through Chief of Staff,
 # which will capture a task into the vault repo.
-curl -X POST https://the-council.fly.dev/message \
-  -H "Authorization: Bearer $INTAKE_TOKEN" \
+curl -X POST https://$APP.fly.dev/message \
+  -H "Authorization: Bearer $INTAKE" \
   -H "Content-Type: application/json" \
   -d '{"text":"deploy smoke test — create a P3 task to verify Fly deploy ran"}'
 ```
@@ -129,8 +140,8 @@ fly secrets set ANTHROPIC_API_KEY=sk-ant-new-value
 # SSH into the running machine (debugging only)
 fly ssh console
 
-# Tail a specific machine's logs
-fly logs --app the-council
+# Tail logs (auto-detects app from fly.toml in cwd)
+fly logs
 
 # Scale vertically if 512 MB is tight
 fly scale memory 1024
