@@ -47,6 +47,10 @@ const ConfigSchema = z.object({
     phoneNumberId: z.string().default(""),
     accessToken: z.string().default(""),
     verifyToken: z.string().default(""),
+    // App secret for verifying X-Hub-Signature-256 on inbound webhooks.
+    // Without this, anyone could POST to /webhooks/whatsapp and the system
+    // would happily run agent loops on their input.
+    appSecret: z.string().default(""),
     toNumber: z.string().default(""),
   }),
 });
@@ -95,6 +99,7 @@ function loadConfig(): Config {
       phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
       accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
       verifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
+      appSecret: process.env.WHATSAPP_APP_SECRET,
       toNumber: process.env.WHATSAPP_TO_NUMBER,
     },
   };

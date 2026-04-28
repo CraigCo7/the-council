@@ -4,6 +4,7 @@ import { logger } from "../logger.js";
 import { generateDailyBrief } from "../briefs/daily.js";
 import { generateWeeklyReview } from "../briefs/weekly.js";
 import { send } from "../messenger/index.js";
+import { fitForWhatsappBody } from "../messenger/format.js";
 import { db } from "../db/sqlite.js";
 import { toLocalISODate, toLocalISODateTime } from "../vault/time.js";
 import { overdueTasks } from "../vault/tasks.js";
@@ -44,7 +45,12 @@ export function startCron(): void {
     () =>
       void withLog("daily_brief", async () => {
         const brief = await generateDailyBrief();
-        await send(`📋 Daily brief for ${toLocalISODate()}:\n\n${brief.body}`);
+        const message = fitForWhatsappBody({
+          header: `Daily brief — ${toLocalISODate()}`,
+          body: brief.body,
+          vaultRel: brief.relPath,
+        });
+        await send(message, "whatsapp");
       }),
     { timezone: config.operator.timezone },
   );
@@ -54,7 +60,12 @@ export function startCron(): void {
     () =>
       void withLog("weekly_review", async () => {
         const review = await generateWeeklyReview();
-        await send(`📊 Weekly review:\n\n${review.body}`);
+        const message = fitForWhatsappBody({
+          header: "Weekly review",
+          body: review.body,
+          vaultRel: review.relPath,
+        });
+        await send(message, "whatsapp");
       }),
     { timezone: config.operator.timezone },
   );
