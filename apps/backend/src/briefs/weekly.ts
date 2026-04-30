@@ -83,7 +83,7 @@ export async function generateWeeklyReview(): Promise<{ relPath: string; body: s
       },
     ],
   });
-  logUsage("weekly-review", response.usage);
+  logUsage("weekly-review", defaults.model, response.usage);
 
   const body = response.content
     .flatMap((b) => (b.type === "text" ? [b.text] : []))

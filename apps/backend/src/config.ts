@@ -35,6 +35,9 @@ const ConfigSchema = z.object({
     dailyBrief: z.string().default("0 7 * * *"),
     weeklyReview: z.string().default("0 18 * * 0"),
     deadlineSweep: z.string().default("0 * * * *"),
+    // Daily Anthropic-cost summary, emitted to logs only. Default 23:59 in
+    // operator timezone — captures the full day before the calendar rolls.
+    dailyCost: z.string().default("59 23 * * *"),
   }),
   db: z.object({
     path: z.string().default("./data/council.sqlite"),
@@ -103,6 +106,7 @@ function loadConfig(): Config {
       dailyBrief: process.env.CRON_DAILY_BRIEF,
       weeklyReview: process.env.CRON_WEEKLY_REVIEW,
       deadlineSweep: process.env.CRON_DEADLINE_SWEEP,
+      dailyCost: process.env.CRON_DAILY_COST,
     },
     db: { path: process.env.DB_PATH },
     log: { level: process.env.LOG_LEVEL as Config["log"]["level"] | undefined },

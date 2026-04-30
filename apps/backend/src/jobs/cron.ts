@@ -9,8 +9,9 @@ import { db } from "../db/sqlite.js";
 import { toLocalISODate, toLocalISODateTime } from "../vault/time.js";
 import { overdueTasks } from "../vault/tasks.js";
 import { syncPull } from "../vault/client.js";
+import { emitDailyCostReport } from "../cost/report.js";
 
-type JobName = "daily_brief" | "weekly_review" | "deadline_sweep";
+type JobName = "daily_brief" | "weekly_review" | "deadline_sweep" | "daily_cost";
 
 async function withLog<T>(name: JobName, fn: () => Promise<T>): Promise<T | null> {
   const started = toLocalISODateTime();
@@ -83,11 +84,25 @@ export function startCron(): void {
     { timezone: config.operator.timezone },
   );
 
+  // Daily cost summary at 23:59 operator-local. Reads from usage_records,
+  // groups by (label, model), prices each, emits one structured `cost.daily`
+  // log entry plus a human-readable breakdown. No channel delivery — read
+  // via `fly logs` or the operator's preferred log viewer.
+  cron.schedule(
+    config.cron.dailyCost,
+    () =>
+      void withLog("daily_cost", async () => {
+        emitDailyCostReport();
+      }),
+    { timezone: config.operator.timezone },
+  );
+
   logger.info(
     {
       dailyBrief: config.cron.dailyBrief,
       weeklyReview: config.cron.weeklyReview,
       deadlineSweep: config.cron.deadlineSweep,
+      dailyCost: config.cron.dailyCost,
       tz: config.operator.timezone,
     },
     "cron jobs scheduled",

@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
+import { db } from "../db/sqlite.js";
+import { toLocalISODateTime } from "../vault/time.js";
 
 export const anthropic = new Anthropic({ apiKey: config.anthropic.apiKey });
 
@@ -31,18 +33,45 @@ export function defaultsFor(role: ModelRole): {
 }
 
 /**
- * Log token usage — surfaces cache hits so we can catch silent invalidators.
+ * Log token usage to the service log AND persist to SQLite for daily cost
+ * aggregation. `model` is required because cost depends on it — without
+ * it the daily cost cron can't price the call.
  */
-export function logUsage(label: string, usage: Anthropic.Messages.Usage | undefined) {
+export function logUsage(
+  label: string,
+  model: string,
+  usage: Anthropic.Messages.Usage | undefined,
+): void {
   if (!usage) return;
+
+  const input = usage.input_tokens;
+  const output = usage.output_tokens;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const cacheCreate = usage.cache_creation_input_tokens ?? 0;
+
   logger.info(
     {
       label,
-      input: usage.input_tokens,
-      output: usage.output_tokens,
-      cache_read: usage.cache_read_input_tokens ?? 0,
-      cache_create: usage.cache_creation_input_tokens ?? 0,
+      model,
+      input,
+      output,
+      cache_read: cacheRead,
+      cache_create: cacheCreate,
     },
     "llm usage",
   );
+
+  try {
+    db()
+      .prepare(
+        `INSERT INTO usage_records
+           (created_at, label, model, input_tokens, output_tokens, cache_read, cache_create)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(toLocalISODateTime(), label, model, input, output, cacheRead, cacheCreate);
+  } catch (err) {
+    // Persistence is best-effort — never fail the main API path because
+    // of a logging side-effect.
+    logger.error({ err, label }, "failed to persist usage record");
+  }
 }

@@ -16,6 +16,9 @@ dist/
 /logs/
 *.sqlite
 *.sqlite-journal
+# Vitest leaks `:memory:`-prefixed files into cwd because path.resolve()
+# turns the better-sqlite3 in-memory marker into a real filesystem path.
+:memory:*
 *.log
 
 # cloned vault (backend clones here at runtime). Match any dir named "vault"
