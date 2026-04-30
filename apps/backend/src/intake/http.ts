@@ -14,6 +14,13 @@ import {
   isExpectedSender,
   processInboundMessage,
 } from "./whatsapp.js";
+import {
+  claimUpdate,
+  extractTelegramMessage,
+  isExpectedChat,
+  processTelegramMessage,
+  verifyTelegramSecret,
+} from "./telegram.js";
 import { send } from "../messenger/index.js";
 import { fitForWhatsappBody } from "../messenger/format.js";
 import { logger } from "../logger.js";
@@ -52,13 +59,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.addHook("onRequest", async (req, reply) => {
-    // Auth gate for everything except health + WhatsApp webhooks.
+    // Auth gate for everything except health + messenger webhooks.
     // - /health: no auth needed (used by Fly's healthcheck).
-    // - /webhooks/whatsapp GET: Meta verification (auth is the verify_token).
-    // - /webhooks/whatsapp POST: Meta delivery (auth is the HMAC signature
-    //   verified inside the handler).
+    // - /webhooks/whatsapp: HMAC signature verified inside the handler.
+    // - /webhooks/telegram: shared-secret header verified inside the handler.
     if (req.url === "/health") return;
     if (req.url.startsWith("/webhooks/whatsapp")) return;
+    if (req.url.startsWith("/webhooks/telegram")) return;
 
     const auth = req.headers.authorization ?? "";
     const expected = `Bearer ${config.server.intakeToken}`;
@@ -120,7 +127,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       body: brief.body,
       vaultRel: brief.relPath,
     });
-    await send(message, "whatsapp");
+    await send(message, "telegram");
     return { ok: true, relPath: brief.relPath };
   });
 
@@ -131,7 +138,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       body: review.body,
       vaultRel: review.relPath,
     });
-    await send(message, "whatsapp");
+    await send(message, "telegram");
     return { ok: true, relPath: review.relPath };
   });
 
@@ -189,6 +196,46 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         }
       } catch (err) {
         logger.error({ err }, "whatsapp webhook background processing failed");
+      }
+    });
+  });
+
+  // Telegram webhook. Auth model is a shared `secret_token` set at webhook
+  // registration time and echoed back on every request via header.
+  app.post("/webhooks/telegram", async (req, reply) => {
+    const provided = req.headers["x-telegram-bot-api-secret-token"];
+    const providedStr = Array.isArray(provided) ? provided[0] : provided;
+    if (!verifyTelegramSecret(providedStr, config.telegram.webhookSecret)) {
+      logger.warn({ hasHeader: Boolean(providedStr) }, "telegram webhook secret invalid — rejecting");
+      return reply.code(403).send();
+    }
+
+    // Acknowledge to Telegram immediately. Slow responses get redelivered
+    // (idempotency below catches it but a fast 200 prevents the round-trip).
+    reply.code(200).send({ ok: true });
+
+    setImmediate(async () => {
+      try {
+        const ext = extractTelegramMessage(req.body);
+        if (!ext) return; // not a text message — silently ignored
+
+        if (!isExpectedChat(ext.message.chat.id)) {
+          logger.warn(
+            { update_id: ext.updateId, chat: ext.message.chat.id },
+            "telegram message from unexpected chat — dropping",
+          );
+          return;
+        }
+        if (!claimUpdate(ext.updateId)) {
+          logger.info(
+            { update_id: ext.updateId },
+            "telegram update already processed — skipping",
+          );
+          return;
+        }
+        await processTelegramMessage(ext);
+      } catch (err) {
+        logger.error({ err }, "telegram webhook background processing failed");
       }
     });
   });

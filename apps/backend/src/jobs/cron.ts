@@ -50,7 +50,7 @@ export function startCron(): void {
           body: brief.body,
           vaultRel: brief.relPath,
         });
-        await send(message, "whatsapp");
+        await send(message, "telegram");
       }),
     { timezone: config.operator.timezone },
   );
@@ -65,7 +65,7 @@ export function startCron(): void {
           body: review.body,
           vaultRel: review.relPath,
         });
-        await send(message, "whatsapp");
+        await send(message, "telegram");
       }),
     { timezone: config.operator.timezone },
   );

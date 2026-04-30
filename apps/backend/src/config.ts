@@ -53,6 +53,18 @@ const ConfigSchema = z.object({
     appSecret: z.string().default(""),
     toNumber: z.string().default(""),
   }),
+  telegram: z.object({
+    enabled: z.coerce.boolean().default(false),
+    // Bot token from @BotFather, format `<botid>:<hash>`.
+    botToken: z.string().default(""),
+    // Numeric chat ID — only this chat is processed; everything else is dropped.
+    // Get it via getUpdates after sending a first message to the bot.
+    chatId: z.string().default(""),
+    // Random string passed to setWebhook → Telegram echoes it back on every
+    // request via X-Telegram-Bot-Api-Secret-Token header. The webhook
+    // equivalent of HMAC for Telegram (Telegram does not sign payloads).
+    webhookSecret: z.string().default(""),
+  }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -101,6 +113,12 @@ function loadConfig(): Config {
       verifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
       appSecret: process.env.WHATSAPP_APP_SECRET,
       toNumber: process.env.WHATSAPP_TO_NUMBER,
+    },
+    telegram: {
+      enabled: process.env.TELEGRAM_ENABLED,
+      botToken: process.env.TELEGRAM_BOT_TOKEN,
+      chatId: process.env.TELEGRAM_CHAT_ID,
+      webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
     },
   };
 
