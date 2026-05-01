@@ -9,7 +9,7 @@ import { db } from "../db/sqlite.js";
 import { toLocalISODate, toLocalISODateTime } from "../vault/time.js";
 import { overdueTasks } from "../vault/tasks.js";
 import { syncPull } from "../vault/client.js";
-import { emitDailyCostReport } from "../cost/report.js";
+import { emitDailyCostReport, formatCostReport } from "../cost/report.js";
 
 type JobName = "daily_brief" | "weekly_review" | "deadline_sweep" | "daily_cost";
 
@@ -86,13 +86,14 @@ export function startCron(): void {
 
   // Daily cost summary at 23:59 operator-local. Reads from usage_records,
   // groups by (label, model), prices each, emits one structured `cost.daily`
-  // log entry plus a human-readable breakdown. No channel delivery — read
-  // via `fly logs` or the operator's preferred log viewer.
+  // log entry, and pushes the human breakdown to Telegram. Telegram delivery
+  // failures fall through to log-only via the messenger fallback chain.
   cron.schedule(
     config.cron.dailyCost,
     () =>
       void withLog("daily_cost", async () => {
-        emitDailyCostReport();
+        const report = emitDailyCostReport();
+        await send(formatCostReport(report), "telegram");
       }),
     { timezone: config.operator.timezone },
   );
