@@ -25,7 +25,7 @@ export async function consultStrategicAnalyst(input: AnalystInput): Promise<stri
     ],
   });
 
-  logUsage("strategic-analyst", response.usage);
+  logUsage("strategic-analyst", defaults.model, response.usage);
 
   const text = response.content
     .flatMap((b) => (b.type === "text" ? [b.text] : []))

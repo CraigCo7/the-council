@@ -59,7 +59,7 @@ export async function generateDailyBrief(): Promise<{ relPath: string; body: str
       },
     ],
   });
-  logUsage("daily-brief", response.usage);
+  logUsage("daily-brief", defaults.model, response.usage);
 
   const llmBody = response.content
     .flatMap((b) => (b.type === "text" ? [b.text] : []))

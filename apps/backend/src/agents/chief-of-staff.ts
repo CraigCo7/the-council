@@ -54,7 +54,7 @@ export async function runChiefOfStaff(input: ChiefInput): Promise<ChiefOutput> {
       tools,
       messages,
     });
-    logUsage(`chief-of-staff:iter${i}`, response.usage);
+    logUsage(`chief-of-staff:iter${i}`, defaults.model, response.usage);
     totals.input_tokens += response.usage.input_tokens;
     totals.output_tokens += response.usage.output_tokens;
     totals.cache_read += response.usage.cache_read_input_tokens ?? 0;

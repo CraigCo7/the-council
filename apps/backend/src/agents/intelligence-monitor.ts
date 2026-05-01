@@ -43,7 +43,7 @@ export async function surfaceSignals(): Promise<SignalSummary> {
     ],
   });
 
-  logUsage("intelligence-monitor", response.usage);
+  logUsage("intelligence-monitor", defaults.model, response.usage);
 
   const text = response.content
     .flatMap((b) => (b.type === "text" ? [b.text] : []))
