@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TagListOptional } from "../vault/schemas.js";
+import { ProjectEnum, TagListOptional, TaskType } from "../vault/schemas.js";
 import {
   CreateTaskInput,
   createTask,
@@ -44,9 +44,12 @@ const dispatchers: Record<string, Dispatcher> = {
         id: z.string(),
         status: z.enum(["open", "in_progress", "blocked", "done", "dropped"]).optional(),
         priority: z.enum(["P0", "P1", "P2", "P3"]).optional(),
+        project: ProjectEnum.optional(),
+        type: TaskType.optional(),
         deadline: z.string().nullable().optional(),
         title: z.string().optional(),
         tags: TagListOptional,
+        waiting_on: z.string().nullable().optional(),
         logEntry: z.string().optional(),
       })
       .parse(raw);
