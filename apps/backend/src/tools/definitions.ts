@@ -48,7 +48,7 @@ export function toolDefinitions(): Anthropic.Tool[] {
     },
     {
       name: "update_task",
-      description: "Update an existing task by id. Use for status changes, deadline bumps, log entries, re-prioritizations of a single task.",
+      description: "Update an existing task by id. Use for status changes, deadline bumps, log entries, re-prioritizations, project moves, and waiting-on changes.",
       input_schema: {
         type: "object",
         properties: {
@@ -58,9 +58,23 @@ export function toolDefinitions(): Anthropic.Tool[] {
             enum: ["open", "in_progress", "blocked", "done", "dropped"],
           },
           priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
+          project: {
+            type: "string",
+            enum: projectEnum,
+            description: "Move the task to a different project bucket.",
+          },
+          type: {
+            type: "string",
+            enum: ["task", "idea", "reminder", "delegated", "waiting-for"],
+            description: "Reclassify the task (e.g. task → reminder, or task → waiting-for).",
+          },
           deadline: { type: ["string", "null"] },
           title: { type: "string" },
           tags: { type: "array", items: { type: "string" } },
+          waiting_on: {
+            type: ["string", "null"],
+            description: "Required when type='waiting-for'; null clears it.",
+          },
           logEntry: {
             type: "string",
             description: "Human log line appended under ## Log, e.g. 'sent draft to lawyer'.",
