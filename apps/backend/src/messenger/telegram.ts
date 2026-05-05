@@ -26,6 +26,52 @@ export function mdToTelegramHtml(text: string): string {
     .replace(/`([^`\n]+?)`/g, "<code>$1</code>");
 }
 
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+/**
+ * Convert ISO calendar dates (YYYY-MM-DD) to "Month Day Year" for human
+ * readability on Telegram. The vault stays ISO (sortable, queryable, plays
+ * nice with Obsidian Dataview); only outbound chat gets the friendly form.
+ *
+ * Excludes ISO datetimes (e.g. `2026-05-06T12:00:00+08:00`) — the trailing
+ * `T` triggers the negative lookahead. Alfred rarely shows datetimes in
+ * conversation, but the guard prevents `created_at`/`updated_at` from
+ * being mangled in the rare case the model surfaces them.
+ *
+ * Also excludes dates immediately preceded by `-` (so the date *inside*
+ * a task ID like `T-20260506-foo` is unaffected — though task IDs use a
+ * compact YYYYMMDD form anyway, this is belt-and-suspenders).
+ *
+ * @example
+ *   humanizeDates("Deadline: 2026-05-06 (TODAY)")
+ *   // → "Deadline: May 6 2026 (TODAY)"
+ */
+export function humanizeDates(text: string): string {
+  return text.replace(
+    /(?<![-\d])(\d{4})-(\d{2})-(\d{2})(?!T|\d|-)/g,
+    (match, y, mo, d) => {
+      const monthIdx = parseInt(mo, 10) - 1;
+      const dayNum = parseInt(d, 10);
+      if (monthIdx < 0 || monthIdx > 11) return match;
+      if (dayNum < 1 || dayNum > 31) return match;
+      return `${MONTHS[monthIdx]} ${dayNum} ${y}`;
+    },
+  );
+}
+
 /**
  * Telegram Bot API outbound send.
  *
@@ -42,8 +88,11 @@ export async function sendTelegram(text: string): Promise<void> {
   }
 
   const url = `https://api.telegram.org/bot${config.telegram.botToken}/sendMessage`;
-  // Render Markdown bold/code as Telegram HTML, trim to the 4096-char cap.
-  const rendered = mdToTelegramHtml(text).slice(0, 4096);
+  // Render Markdown bold/code as Telegram HTML, then humanize ISO dates.
+  // Order: HTML transform first (it inserts tags), date humanizer second
+  // (it operates on plain digit patterns, unaffected by surrounding tags).
+  // Trim to the 4096-char cap last.
+  const rendered = humanizeDates(mdToTelegramHtml(text)).slice(0, 4096);
   const body = {
     chat_id: config.telegram.chatId,
     text: rendered,
