@@ -42,6 +42,101 @@ Every step has guards. The vault is the single source of truth — SQLite holds 
 
 ---
 
+## Plain-English version (no code references)
+
+If you just want to understand what's happening at a high level — what your money buys, when data lands, and where the system can break — start here. The technical walkthroughs below answer "where in the codebase," but those don't matter for operating the system day-to-day.
+
+### What happens when you make a task call
+
+Step by step, in order, from the moment you hit "send" on Telegram:
+
+1. **Telegram receives your message** and forwards it to your Council backend (the always-on machine on Fly).
+2. **The backend confirms it's actually you** — it checks the secret Telegram includes in the request and the chat ID. Anything not from you is dropped.
+3. **The backend syncs the vault** — pulls the latest from GitHub in case you edited a task in Obsidian on your laptop since the last interaction. This is what keeps Alfred from clobbering your manual edits.
+4. **The backend asks Claude what to do** — it sends your message + the long Alfred prompt + the recent conversation + the list of available tools. Claude reads it and decides: "this looks like a task to capture."
+5. **Claude calls a tool** — it tells the backend "create a task named X in project Y with priority Z and deadline tomorrow."
+6. **The backend writes the task** — it generates an ID, builds the markdown file, saves it to the local copy of the vault, then `git commit` and `git push` to GitHub. By the end of this step, your task is durably on GitHub.
+7. **The backend tells Claude the result** — "Done, here's the task data."
+8. **Claude wraps up** — usually with no further commentary. The receipt you see (`✓ Captured: ...`) is **not** written by Claude — the backend writes it from the actual data that was just saved. (This is why receipts are now trustworthy.)
+9. **The reply goes back to Telegram** — formatted with bold labels and human-readable dates.
+10. **You see the receipt on your phone** — usually within 5–10 seconds total.
+
+For closing a task ("mark X as done") or modifying ("move X to YNG"), the same flow runs but with one extra round trip: Claude calls `list_tasks` first to look up the task by description, then calls `update_task` with the real ID. That's three Claude calls instead of two.
+
+### Where things can go wrong
+
+Roughly in increasing order of how often you'll see them:
+
+| Failure | What you'll see | Where it lives |
+|---|---|---|
+| **Network blip on Telegram → backend** | Slight delay, then the message arrives. Telegram retries automatically. | Telegram's infrastructure |
+| **Backend is in the middle of a redeploy** | Brief 502/503 from Fly's edge for 10–30 seconds. Telegram will retry; the message lands once the new machine is healthy. | Fly.io |
+| **Vault sync conflict** (you edited a task in Obsidian and Alfred edits the same one before pulling) | A warning in `fly logs`. The bot's write may overwrite your manual edit, or `git push` may fail. Rare with one user; would be a bigger issue with a team. | Vault git client |
+| **Claude misclassifies** (defaults to wrong project, sets a P2 you'd call P1, etc.) | The receipt shows the wrong category. You can correct it with a follow-up message ("change priority to P1"). | Alfred's prompt + Claude itself |
+| **Tool execution fails** (vault disk full, GitHub temporarily unreachable, PAT revoked) | Alfred replies with an error message saying what failed. The task is NOT in the vault. You re-issue when the cause is resolved. | Tool dispatcher |
+| **Claude API outage** | The bot doesn't respond at all, or returns a generic error. Anthropic's status page tells you whether it's their problem. | Anthropic |
+| **Forging** (Claude says "✓ Captured" without actually creating the task) | Used to be a real risk. As of PR #14, **the system writes the receipt from real data, so this can't happen anymore**. The model could write a fake receipt line, but it gets stripped before you ever see it. | Eliminated |
+| **GitHub PAT expires** | Vault writes start failing. You see "tool returned an error" on the next capture. Fix is to generate a new PAT and `fly secrets set VAULT_REMOTE=...`. | GitHub |
+| **Anthropic spend cap hit** | Bot stops responding mid-sentence or returns an error. You'd raise the cap in the Anthropic console. The cap is set to $25/month right now. | Anthropic |
+
+If something silently goes wrong (you sent a message, didn't get a reply), `fly logs --app the-council-empty-voice-9193` is the first place to look. Every step above logs something.
+
+### When does a commit get stored to the vault?
+
+**Once per successful write tool call**, immediately after the file is saved.
+
+Concretely:
+
+| Action | Commits | Notes |
+|---|---|---|
+| Capture a single task | 1 commit | "task: capture T-... — Title" |
+| Mark a task done | 1 commit | "task: update T-..." |
+| Move a task to a different project | 1 commit | "task: update T-..." |
+| Edit a task by description ("mark X done") | 1 commit | The `list_tasks` lookup doesn't commit anything; only the `update_task` does |
+| Ask "what's overdue" | 0 commits | Read-only |
+| Ask "what's on my plate" | 0 commits | Read-only |
+| Pressure-test a decision (Strategic Analyst) | 0 commits | The Analyst doesn't write to the vault |
+| Daily brief at 07:00 | 1 commit | The brief markdown file in `09-Briefs/` |
+| Weekly review on Sunday | 1 commit | Same idea, in `04-Weekly/` |
+
+Each commit is pushed to GitHub immediately as part of the same operation. By the time you see the `✓ Captured` receipt on Telegram, the file is already on GitHub. Pull from your laptop and Obsidian will show the new task.
+
+If multiple writes happen in one conversational turn (rare — say, you ask Alfred to create three tasks in one message), each one gets its own commit. You'll see three commits on GitHub.
+
+If `git push` fails (network blip), the commit stays on the Fly machine's local copy and pushes on the next operation. The data is safe; it's just not on GitHub yet.
+
+### When you're charged for Anthropic credits
+
+Every time the backend calls the Claude API. Concretely:
+
+| Operation | Number of Claude calls | Approximate cost (with cache) |
+|---|---|---|
+| Simple capture ("remind me to do X") | 2 Sonnet calls | ~$0.003 |
+| Status check ("what's overdue") | 2 Sonnet calls | ~$0.002 |
+| Edit by description ("mark X done") | 3 Sonnet calls | ~$0.005 |
+| Pressure-test a decision | 2 Sonnet + 1 Opus call | ~$0.05–0.10 |
+| Daily brief (cron, 07:00) | 1 Sonnet call | ~$0.005 |
+| Weekly review (cron, Sunday 18:00) | 1 Opus call | ~$0.05 |
+| Hourly cost rollup (cron) | 0 Claude calls | $0 — pure SQLite math |
+
+You are NOT charged for:
+
+- Telegram messages (free)
+- GitHub operations (free, public + private repos)
+- Fly.io hosting (fixed ~$2–4/month regardless of traffic)
+- The webhook delivery itself, the SQLite writes, or the markdown file generation
+- The receipt synthesis (it's pure code — no Claude call)
+
+The cost is dominated by the **Anthropic input tokens** (the prompt + history + tool results sent to Claude) and **output tokens** (Claude's reply). Prompt caching makes the first ~3,000 tokens of every request very cheap on the second and subsequent turns within a 5-minute window — that's why the per-call cost stays in the fraction-of-a-cent range.
+
+The Strategic Analyst is the most expensive thing in the system because it uses Opus 4.7 with extended thinking. Each consult is ~10–30× the cost of a simple capture. Worth it for genuine decisions; deliberately gated behind the routing rule "consult only on real tradeoffs."
+
+A typical heavy day (50 messages, 5 brief generations, 3 strategic consults, daily + weekly briefs) runs about **\$0.50–\$1.00 in Anthropic spend**. Light days are **under \$0.20**. The \$25/month cap leaves substantial headroom.
+
+The 23:59 cost report writes today's actual spend to `fly logs` and Telegram — that's the ground truth, not these estimates.
+
+---
+
 ## Opening a task
 
 **You text:** `remind me to call Wendy tomorrow`
