@@ -1,93 +1,179 @@
 import { describe, it, expect } from "vitest";
-import { guardConfirmations } from "./chief-of-staff.js";
+import {
+  composeFinalText,
+  receiptFor,
+  stripModelReceipts,
+} from "./chief-of-staff.js";
 
 type ToolCall = { name: string; input: unknown; result: string; is_error?: boolean };
 
-const noTools: ToolCall[] = [];
-const captureOk: ToolCall[] = [
-  { name: "create_task", input: {}, result: '{"ok":true}', is_error: false },
-];
-const updateOk: ToolCall[] = [
-  { name: "update_task", input: {}, result: '{"ok":true}', is_error: false },
-];
-const captureFailed: ToolCall[] = [
-  { name: "create_task", input: {}, result: '{"ok":false}', is_error: true },
-];
-const listOnly: ToolCall[] = [
-  { name: "list_tasks", input: {}, result: "[]", is_error: false },
-];
+const successfulCreate = (overrides: Partial<Record<string, unknown>> = {}): ToolCall => ({
+  name: "create_task",
+  input: {},
+  result: JSON.stringify({
+    ok: true,
+    id: "T-20260506-buy-milk",
+    relPath: "02-Tasks/2026/T-20260506-buy-milk.md",
+    committed: true,
+    hash: "abc123",
+    task: {
+      id: "T-20260506-buy-milk",
+      title: "Buy milk",
+      project: "Personal",
+      priority: "P2",
+      status: "open",
+      type: "task",
+      deadline: null,
+      ...overrides,
+    },
+  }),
+  is_error: false,
+});
 
-describe("guardConfirmations", () => {
-  it("passes through a real ✓ Captured when create_task succeeded", () => {
-    const text = "✓ Captured: Buy milk [Personal · P2]";
-    expect(guardConfirmations(text, captureOk)).toBe(text);
+const successfulUpdate = (overrides: Partial<Record<string, unknown>> = {}): ToolCall => ({
+  name: "update_task",
+  input: {},
+  result: JSON.stringify({
+    ok: true,
+    id: "T-20260506-buy-milk",
+    committed: true,
+    hash: "def456",
+    task: {
+      id: "T-20260506-buy-milk",
+      title: "Buy milk",
+      project: "Personal",
+      priority: "P1",
+      status: "open",
+      type: "task",
+      deadline: "2026-05-15",
+      ...overrides,
+    },
+  }),
+  is_error: false,
+});
+
+const failedCreate: ToolCall = {
+  name: "create_task",
+  input: {},
+  result: JSON.stringify({ ok: false, error: "vault unreachable" }),
+  is_error: true,
+};
+
+const listOnly: ToolCall = {
+  name: "list_tasks",
+  input: {},
+  result: "[]",
+  is_error: false,
+};
+
+describe("receiptFor", () => {
+  it("builds a Captured receipt from a successful create_task with deadline", () => {
+    const r = receiptFor(successfulCreate({ deadline: "2026-05-15", priority: "P1" }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P1 · 2026-05-15]");
   });
 
-  it("passes through a real ✓ Updated when update_task succeeded", () => {
-    const text = "✓ Updated: Buy milk → P1";
-    expect(guardConfirmations(text, updateOk)).toBe(text);
+  it("renders 'no deadline' when deadline is null", () => {
+    const r = receiptFor(successfulCreate({ deadline: null }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]");
   });
 
-  it("strips a forged ✓ Captured when no create_task ran", () => {
-    const text = "✓ Captured: Buy milk [Personal · P2]";
-    const out = guardConfirmations(text, noTools);
-    expect(out).not.toContain("✓ Captured:");
-    expect(out).toContain("did not actually call the tool");
+  it("builds an Updated receipt from update_task with the post-update state", () => {
+    const r = receiptFor(successfulUpdate());
+    expect(r).toBe("✓ Updated: Buy milk [Personal · P1 · 2026-05-15]");
   });
 
-  it("strips a forged ✓ Updated when no update_task ran", () => {
-    const text = "✓ Updated: something";
-    const out = guardConfirmations(text, listOnly);
-    expect(out).not.toContain("✓ Updated:");
-    expect(out).toContain("did not actually call the tool");
+  it("returns null for errored create_task (no receipt for failed work)", () => {
+    expect(receiptFor(failedCreate)).toBeNull();
   });
 
-  it("strips a forged ✓ Captured when create_task ERRORED (is_error true)", () => {
-    const text = "✓ Captured: Buy milk";
-    const out = guardConfirmations(text, captureFailed);
-    expect(out).not.toContain("✓ Captured:");
+  it("returns null for non-task tool calls (list_tasks, etc.)", () => {
+    expect(receiptFor(listOnly)).toBeNull();
   });
 
-  it("preserves remaining content after stripping a forged receipt", () => {
-    const text = [
-      "✓ Captured: Buy milk [Personal · P2]",
-      "",
-      "Note: don't forget the receipt is in your wallet.",
-    ].join("\n");
-    const out = guardConfirmations(text, noTools);
-    expect(out).toContain("Note: don't forget");
-    expect(out).not.toContain("✓ Captured:");
-    expect(out).toContain("did not actually call the tool");
+  it("returns null on a malformed JSON payload", () => {
+    expect(
+      receiptFor({ name: "create_task", input: {}, result: "not json", is_error: false }),
+    ).toBeNull();
   });
 
-  it("falls back to the warning-only message when the entire response was forged", () => {
-    const text = "✓ Captured: Buy milk";
-    const out = guardConfirmations(text, noTools);
-    expect(out.split("\n\n").length).toBe(1); // notice only, nothing else
+  it("returns null when ok=true but task field is absent (legacy result shape)", () => {
+    expect(
+      receiptFor({
+        name: "create_task",
+        input: {},
+        result: JSON.stringify({ ok: true, id: "T-x" }),
+        is_error: false,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("stripModelReceipts", () => {
+  it("strips a single ✓ Captured line", () => {
+    expect(stripModelReceipts("✓ Captured: Buy milk")).toBe("");
   });
 
-  it("does not strip when the line uses the prefix mid-sentence (false-positive guard)", () => {
-    const text = "I will mark this as ✓ Captured: only after the tool returns.";
-    // line does NOT start with the prefix — so it should pass through
-    const out = guardConfirmations(text, noTools);
-    expect(out).toBe(text);
+  it("strips a single ✓ Updated line", () => {
+    expect(stripModelReceipts("✓ Updated: Buy milk")).toBe("");
   });
 
-  it("handles a multi-block response with both forged and real content", () => {
-    const text = [
-      "✓ Captured: Buy milk",
-      "",
-      "✓ Updated: Buy bread → P1",
-    ].join("\n");
-    // create succeeded, update did NOT
-    const out = guardConfirmations(text, captureOk);
-    expect(out).toContain("✓ Captured: Buy milk");
-    expect(out).not.toContain("✓ Updated:");
-    expect(out).toContain("did not actually call the tool");
+  it("preserves other lines", () => {
+    const input = ["✓ Captured: Buy milk", "", "Note: heads up about a conflict."].join("\n");
+    expect(stripModelReceipts(input)).toBe("Note: heads up about a conflict.");
   });
 
-  it("returns text unchanged on a normal status reply (no prefixes at all)", () => {
-    const text = "**Name:** Buy milk\n**Project:** Personal";
-    expect(guardConfirmations(text, listOnly)).toBe(text);
+  it("does not strip a prefix mid-sentence", () => {
+    expect(stripModelReceipts("After capture I'll mark ✓ Captured: as the result.")).toBe(
+      "After capture I'll mark ✓ Captured: as the result.",
+    );
+  });
+
+  it("returns input unchanged when no receipts are present", () => {
+    expect(stripModelReceipts("Plain commentary about the task.")).toBe(
+      "Plain commentary about the task.",
+    );
+  });
+});
+
+describe("composeFinalText", () => {
+  it("synthesizes a receipt and prepends it to commentary", () => {
+    const out = composeFinalText("Note: defaulted to Personal.", [successfulCreate()]);
+    expect(out).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]\n\nNote: defaulted to Personal.");
+  });
+
+  it("returns just the synthesized receipt when the model wrote nothing useful", () => {
+    expect(composeFinalText("", [successfulCreate()])).toBe(
+      "✓ Captured: Buy milk [Personal · P2 · no deadline]",
+    );
+  });
+
+  it("returns just the receipt when model only wrote a (stripped) forgery", () => {
+    expect(composeFinalText("✓ Captured: Buy milk", [successfulCreate()])).toBe(
+      "✓ Captured: Buy milk [Personal · P2 · no deadline]",
+    );
+  });
+
+  it("returns commentary alone when no successful capture/update happened", () => {
+    expect(composeFinalText("Here are your overdue tasks.", [listOnly])).toBe(
+      "Here are your overdue tasks.",
+    );
+  });
+
+  it("strips a forged receipt even when no real tool call ran (drift defense)", () => {
+    expect(composeFinalText("✓ Captured: Buy milk", [])).toBe("");
+  });
+
+  it("handles multiple successful tool calls in one turn (one receipt each)", () => {
+    const out = composeFinalText("", [successfulCreate({ title: "Buy milk" }), successfulCreate({ title: "Buy bread" })]);
+    expect(out).toBe(
+      [
+        "✓ Captured: Buy milk [Personal · P2 · no deadline]",
+        "✓ Captured: Buy bread [Personal · P2 · no deadline]",
+      ].join("\n"),
+    );
+  });
+
+  it("does not synthesize a receipt when the tool errored", () => {
+    expect(composeFinalText("Vault is offline.", [failedCreate])).toBe("Vault is offline.");
   });
 });

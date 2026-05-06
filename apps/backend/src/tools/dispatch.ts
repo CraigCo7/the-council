@@ -27,6 +27,10 @@ const dispatchers: Record<string, Dispatcher> = {
       [path.join(vaultPath(), task.relPath)],
       `task: capture ${task.frontmatter.id} — ${task.frontmatter.title}`,
     );
+    // The `task` field is consumed by the receipt synthesizer in
+    // chief-of-staff.ts to produce `✓ Captured: ...` from real data.
+    // Including the full frontmatter snapshot makes the receipt
+    // trustworthy regardless of what the model would have written.
     return {
       content: JSON.stringify({
         ok: true,
@@ -34,6 +38,7 @@ const dispatchers: Record<string, Dispatcher> = {
         relPath: task.relPath,
         committed,
         hash,
+        task: task.frontmatter,
       }),
     };
   },
@@ -63,7 +68,18 @@ const dispatchers: Record<string, Dispatcher> = {
       [path.join(vaultPath(), updated.relPath)],
       `task: update ${updated.frontmatter.id}`,
     );
-    return { content: JSON.stringify({ ok: true, id, committed, hash }) };
+    // The `task` field carries the post-update frontmatter so the receipt
+    // synthesizer can render `✓ Updated: <title> [<project> · ...]` from
+    // the new state, not whatever the model thought happened.
+    return {
+      content: JSON.stringify({
+        ok: true,
+        id,
+        committed,
+        hash,
+        task: updated.frontmatter,
+      }),
+    };
   },
 
   list_tasks: async (raw) => {

@@ -63,13 +63,13 @@ export async function runChiefOfStaff(input: ChiefInput): Promise<ChiefOutput> {
     messages.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "end_turn") {
-      const text = guardConfirmations(textFromContent(response.content), toolCalls);
+      const text = composeFinalText(textFromContent(response.content), toolCalls);
       return { text, toolCalls, usage: totals };
     }
 
     if (response.stop_reason !== "tool_use") {
       logger.warn({ stop_reason: response.stop_reason }, "unexpected stop_reason");
-      const text = guardConfirmations(textFromContent(response.content), toolCalls);
+      const text = composeFinalText(textFromContent(response.content), toolCalls);
       return { text, toolCalls, usage: totals };
     }
 
@@ -105,58 +105,91 @@ function textFromContent(content: Anthropic.ContentBlock[]): string {
 }
 
 /**
- * Strip forged confirmation prefixes when no successful matching tool call
- * happened in this turn.
+ * Strip ANY `✓ Captured:` / `✓ Updated:` line the model produced. The
+ * model is no longer responsible for writing receipts — `composeFinalText`
+ * synthesizes them from real tool results below. Stripping is unconditional
+ * because a model-written receipt is, at best, redundant with the
+ * synthesized one and, at worst, a forged claim about something that
+ * didn't happen. The data lives in `toolCalls`; trust that, not the prose.
  *
- * Background: an observed failure was Alfred replying `✓ Captured: …` for
- * messages where `create_task` was never invoked. The receipt looked real;
- * the task was never written. The prompt says don't do this, but prompts
- * drift. This is the durable invariant.
- *
- * Implementation: any LINE in the response that starts with `✓ Captured:`
- * or `✓ Updated:` is dropped if there's no successful create_task /
- * update_task tool call recorded in this turn. The remaining text is
- * preserved (so genuine context the operator should still see survives).
- * If the entire response was nothing but a forged receipt, we replace it
- * with a meta-message admitting the problem so the operator isn't
- * silently misled.
+ * Returns the text with receipt-prefixed lines removed.
  */
-export function guardConfirmations(
-  text: string,
-  toolCalls: ChiefOutput["toolCalls"],
-): string {
-  const ranCreate = toolCalls.some((t) => t.name === "create_task" && !t.is_error);
-  const ranUpdate = toolCalls.some((t) => t.name === "update_task" && !t.is_error);
-
-  // No forging possible if both happened — short-circuit.
-  if (ranCreate && ranUpdate) return text;
-
+export function stripModelReceipts(text: string): string {
   const lines = text.split("\n");
   const kept: string[] = [];
   let stripped = 0;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!ranCreate && trimmed.startsWith("✓ Captured:")) {
-      stripped++;
-      continue;
-    }
-    if (!ranUpdate && trimmed.startsWith("✓ Updated:")) {
+    if (trimmed.startsWith("✓ Captured:") || trimmed.startsWith("✓ Updated:")) {
       stripped++;
       continue;
     }
     kept.push(line);
   }
+  if (stripped > 0) {
+    logger.warn(
+      { stripped, sample: text.slice(0, 200) },
+      "stripped model-written receipt prefix — receipts are now code-generated",
+    );
+  }
+  return kept.join("\n").trim();
+}
 
-  if (stripped === 0) return text;
+/**
+ * Build a deterministic receipt line from a successful create_task or
+ * update_task tool result. Returns null for any other tool, errored
+ * results, or malformed payloads. Format matches the prior model-emitted
+ * shape for visual continuity:
+ *
+ *   ✓ Captured: <title> [<Project> · <Priority> · <Deadline>]
+ *   ✓ Updated:  <title> [<Project> · <Priority> · <Deadline>]
+ *
+ * Deadline renders as the ISO date when set (the messenger humanizes it
+ * to "Month Day Year" before delivery) or "no deadline" when null.
+ */
+export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | null {
+  if (call.is_error) return null;
+  if (call.name !== "create_task" && call.name !== "update_task") return null;
 
-  logger.warn(
-    { stripped, ranCreate, ranUpdate, original: text.slice(0, 200) },
-    "guarded forged confirmation prefix — agent claimed capture/update without running the tool",
-  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(call.result);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const r = parsed as { ok?: boolean; task?: Record<string, unknown> };
+  if (!r.ok || !r.task) return null;
 
-  const remaining = kept.join("\n").trim();
-  const notice =
-    "(Council) I claimed to capture or update something but did not actually call the tool. Re-issue the request to log it for real.";
+  const t = r.task;
+  const title = String(t.title ?? "").trim();
+  const project = String(t.project ?? "").trim();
+  const priority = String(t.priority ?? "").trim();
+  const deadline = t.deadline ? String(t.deadline) : "no deadline";
+  if (!title || !project || !priority) return null;
 
-  return remaining.length === 0 ? notice : `${notice}\n\n${remaining}`;
+  const verb = call.name === "create_task" ? "Captured" : "Updated";
+  return `✓ ${verb}: ${title} [${project} · ${priority} · ${deadline}]`;
+}
+
+/**
+ * Compose the final text the user sees: synthesized receipts (one per
+ * successful create/update tool call) on top, then any commentary the
+ * model produced (with its own receipt attempts stripped). This is the
+ * Option B fix — the model never writes the receipt; the system does,
+ * from data the dispatcher actually persisted.
+ */
+export function composeFinalText(
+  modelText: string,
+  toolCalls: ChiefOutput["toolCalls"],
+): string {
+  const receipts = toolCalls
+    .map(receiptFor)
+    .filter((r): r is string => r !== null);
+
+  const commentary = stripModelReceipts(modelText);
+
+  if (receipts.length === 0) return commentary;
+  if (commentary.length === 0) return receipts.join("\n");
+  return `${receipts.join("\n")}\n\n${commentary}`;
 }
