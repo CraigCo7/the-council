@@ -21,6 +21,12 @@ Format:
 ## Deadlines
 - Due today / overdue: bullets with project tag.
 
+## Without deadline ({{no_deadline_count}})
+- Surface every open task without a deadline — the operator wants daily visibility on these so they don't slip.
+- Group delegated / waiting-for items first, then operator's own undated tasks.
+- For delegated/waiting-for items, lead with the person: "Christian — schedule meeting with Wendy [BidaWash]".
+- Skip the section header (and this entire section) only when there are zero such tasks.
+
 ## Open ({{open_count}}) — by project
 - One bullet per project. Top 2–3 items only. Skip empty projects.
 
@@ -36,18 +42,23 @@ export async function generateDailyBrief(): Promise<{ relPath: string; body: str
   const tasks = openTasks();
   const overdue = tasks.filter((t) => t.frontmatter.deadline && t.frontmatter.deadline < today);
   const dueToday = tasks.filter((t) => t.frontmatter.deadline === today);
+  const noDeadline = tasks.filter((t) => !t.frontmatter.deadline);
 
   const defaults = defaultsFor("brief");
   const system = SYSTEM.replaceAll("{{name}}", config.operator.name)
     .replaceAll("{{date}}", today)
-    .replaceAll("{{open_count}}", String(tasks.length));
+    .replaceAll("{{open_count}}", String(tasks.length))
+    .replaceAll("{{no_deadline_count}}", String(noDeadline.length));
 
-  const taskSnapshot = tasks
-    .map((t) => {
-      const fm = t.frontmatter;
-      return `- [${fm.priority}] ${fm.title} — ${fm.project}${fm.deadline ? ` (due ${fm.deadline})` : ""} <${fm.id}>`;
-    })
-    .join("\n");
+  const renderRow = (t: (typeof tasks)[number]) => {
+    const fm = t.frontmatter;
+    const deadlineTag = fm.deadline ? ` (due ${fm.deadline})` : "";
+    const waitingTag = fm.waiting_on ? ` (waiting on ${fm.waiting_on})` : "";
+    const typeTag = fm.type !== "task" ? ` (${fm.type})` : "";
+    return `- [${fm.priority}] ${fm.title} — ${fm.project}${deadlineTag}${waitingTag}${typeTag} <${fm.id}>`;
+  };
+  const taskSnapshot = tasks.map(renderRow).join("\n");
+  const noDeadlineSnapshot = noDeadline.map(renderRow).join("\n");
 
   const response = await anthropic.messages.create({
     ...defaults,
@@ -55,7 +66,19 @@ export async function generateDailyBrief(): Promise<{ relPath: string; body: str
     messages: [
       {
         role: "user",
-        content: `Today: ${today}\nOverdue: ${overdue.length}\nDue today: ${dueToday.length}\nOpen tasks: ${tasks.length}\n\n${taskSnapshot || "(no open tasks)"}`,
+        content: [
+          `Today: ${today}`,
+          `Overdue: ${overdue.length}`,
+          `Due today: ${dueToday.length}`,
+          `Open tasks: ${tasks.length}`,
+          `Without deadline: ${noDeadline.length}`,
+          "",
+          "ALL OPEN TASKS:",
+          taskSnapshot || "(no open tasks)",
+          "",
+          "WITHOUT DEADLINE (subset of above, surface in dedicated section):",
+          noDeadlineSnapshot || "(none)",
+        ].join("\n"),
       },
     ],
   });
@@ -74,6 +97,7 @@ export async function generateDailyBrief(): Promise<{ relPath: string; body: str
       generated_at: toLocalISODateTime(),
       open_task_count: tasks.length,
       overdue_count: overdue.length,
+      no_deadline_count: noDeadline.length,
     },
     llmBody,
   );

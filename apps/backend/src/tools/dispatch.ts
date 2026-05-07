@@ -89,12 +89,24 @@ const dispatchers: Record<string, Dispatcher> = {
         status: z
           .array(z.enum(["open", "in_progress", "blocked", "done", "dropped"]))
           .optional(),
+        waiting_on: z.string().optional(),
+        no_deadline: z.boolean().optional(),
       })
       .parse(raw);
     await syncPull();
-    const filter: { project?: string; status?: Array<"open" | "in_progress" | "blocked" | "done" | "dropped"> } = {};
+    const filter: {
+      project?: string;
+      status?: Array<"open" | "in_progress" | "blocked" | "done" | "dropped">;
+      waitingOn?: string;
+      noDeadline?: boolean;
+    } = {};
     if (parsed.project) filter.project = parsed.project;
     if (parsed.status) filter.status = parsed.status;
+    if (parsed.waiting_on) filter.waitingOn = parsed.waiting_on;
+    if (parsed.no_deadline) filter.noDeadline = parsed.no_deadline;
+    // If the operator didn't specify status, default to open work — anything
+    // closed is rarely what "what's X doing" or "no deadline" queries want.
+    if (!parsed.status) filter.status = ["open", "in_progress", "blocked"];
     const tasks = listTasks(filter);
     return {
       content: JSON.stringify(
@@ -106,6 +118,7 @@ const dispatchers: Record<string, Dispatcher> = {
           status: t.frontmatter.status,
           deadline: t.frontmatter.deadline ?? null,
           type: t.frontmatter.type,
+          waiting_on: t.frontmatter.waiting_on ?? null,
         })),
       ),
     };
