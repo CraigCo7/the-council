@@ -30,6 +30,10 @@ const ConfigSchema = z.object({
     name: z.string().default("Operator"),
     timezone: z.string().default("Asia/Manila"),
     projects: z.array(z.string()).min(1),
+    // The operator's known team members. Used to map Linear issue labels
+    // back to a `waiting_on` value (Jake/Christian/Carlo/Eileen labels
+    // function as pseudo-assignees on the free tier).
+    teamMembers: z.array(z.string()).default([]),
   }),
   cron: z.object({
     dailyBrief: z.string().default("0 7 * * *"),
@@ -55,6 +59,19 @@ const ConfigSchema = z.object({
     // would happily run agent loops on their input.
     appSecret: z.string().default(""),
     toNumber: z.string().default(""),
+  }),
+  linear: z.object({
+    // Personal API key from Linear → Settings → API → Personal API keys.
+    // When empty, Linear integration is treated as disabled and list_tasks
+    // returns vault-only results. Lets us deploy the integration safely
+    // and turn it on by setting the secret.
+    apiKey: z.string().default(""),
+    // The workspace slug shown in Linear URLs: linear.app/<slug>/...
+    // Used to render issue URLs in receipts.
+    workspaceSlug: z.string().default(""),
+    // The single team's identifier (e.g. "CNCL"). All issues live here;
+    // ventures are Projects within the team.
+    teamKey: z.string().default(""),
   }),
   telegram: z.object({
     enabled: z.coerce.boolean().default(false),
@@ -101,6 +118,10 @@ function loadConfig(): Config {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
+      teamMembers: (process.env.OPERATOR_TEAM_MEMBERS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     },
     cron: {
       dailyBrief: process.env.CRON_DAILY_BRIEF,
@@ -117,6 +138,11 @@ function loadConfig(): Config {
       verifyToken: process.env.WHATSAPP_VERIFY_TOKEN,
       appSecret: process.env.WHATSAPP_APP_SECRET,
       toNumber: process.env.WHATSAPP_TO_NUMBER,
+    },
+    linear: {
+      apiKey: process.env.LINEAR_API_KEY,
+      workspaceSlug: process.env.LINEAR_WORKSPACE_SLUG,
+      teamKey: process.env.LINEAR_TEAM_KEY,
     },
     telegram: {
       enabled: process.env.TELEGRAM_ENABLED,
