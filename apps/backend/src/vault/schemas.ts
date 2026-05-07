@@ -41,6 +41,13 @@ export const TaskFrontmatter = z.object({
   waiting_on: z.string().nullable().optional(),
   links: TagList,
   source: z.enum(["chat", "whatsapp", "manual", "system", "cli", "http"]).default("manual"),
+  // Cross-reference to the mirrored Linear issue, if one exists. Populated
+  // when the dispatcher creates / detects a Linear counterpart. Vault is
+  // still the source of truth for actionable-vs-not classification (type),
+  // captured intent, and history; Linear is a projection of the actionable
+  // subset.
+  linear_id: z.string().regex(/^[A-Z0-9]{2,5}-\d+$/).nullable().optional(),
+  linear_url: z.string().url().nullable().optional(),
 });
 export type TaskFrontmatter = z.infer<typeof TaskFrontmatter>;
 

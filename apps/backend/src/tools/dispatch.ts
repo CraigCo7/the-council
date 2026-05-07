@@ -13,6 +13,10 @@ import { enqueue } from "../approvals/queue.js";
 import { consultStrategicAnalyst } from "../agents/strategic-analyst.js";
 import { toLocalISODate } from "../vault/time.js";
 import { listLinearIssues } from "../linear/listIssues.js";
+import { createLinearIssue, shouldMirrorToLinear } from "../linear/createIssue.js";
+import { updateLinearIssue } from "../linear/updateIssue.js";
+import { linearEnabled } from "../linear/client.js";
+import { config } from "../config.js";
 import { logger } from "../logger.js";
 
 export type ToolResult = { content: string; is_error?: boolean };
@@ -23,7 +27,41 @@ const dispatchers: Record<string, Dispatcher> = {
   create_task: async (raw) => {
     const parsed = CreateTaskInput.parse(raw);
     await syncPull();
-    const task = createTask(parsed);
+    let task = createTask(parsed);
+
+    // Mirror to Linear when the type is actionable. Vault is canonical;
+    // Linear failures are non-fatal — we keep the vault task and surface
+    // the failure as a `linear_warning` so the agent can flag it in
+    // commentary if it wants.
+    let linearWarning: string | null = null;
+    if (linearEnabled() && shouldMirrorToLinear(task.frontmatter.type)) {
+      const result = await createLinearIssue({
+        title: parsed.title,
+        type: parsed.type,
+        project: parsed.project,
+        priority: parsed.priority,
+        deadline: parsed.deadline ?? null,
+        waiting_on: parsed.waiting_on ?? null,
+        context: parsed.context,
+      });
+      if (result.ok) {
+        // Write the cross-reference back into the vault frontmatter.
+        // The same file gets re-rendered; commitAndPush below picks up
+        // the cumulative state in one commit.
+        const updated = updateTask(task.frontmatter.id, {
+          linear_id: result.identifier,
+          linear_url: result.url,
+        });
+        if (updated) task = updated;
+      } else {
+        linearWarning = result.error;
+        logger.warn(
+          { id: task.frontmatter.id, error: result.error },
+          "linear mirror failed — vault task created without cross-ref",
+        );
+      }
+    }
+
     const { committed, hash } = await commitAndPush(
       [path.join(vaultPath(), task.relPath)],
       `task: capture ${task.frontmatter.id} — ${task.frontmatter.title}`,
@@ -40,6 +78,7 @@ const dispatchers: Record<string, Dispatcher> = {
         committed,
         hash,
         task: task.frontmatter,
+        linear_warning: linearWarning,
       }),
     };
   },
@@ -65,6 +104,36 @@ const dispatchers: Record<string, Dispatcher> = {
     if (!updated) {
       return { content: JSON.stringify({ ok: false, error: "task not found", id }), is_error: true };
     }
+    // Propagate the patch to Linear if the vault task has a cross-ref.
+    // Same non-fatal posture as create: vault is canonical, Linear failures
+    // are surfaced as `linear_warning` for the agent to flag.
+    let linearWarning: string | null = null;
+    if (linearEnabled() && updated.frontmatter.linear_id) {
+      const result = await updateLinearIssue(
+        updated.frontmatter.linear_id,
+        {
+          title: parsed.title,
+          status: parsed.status,
+          priority: parsed.priority,
+          deadline: parsed.deadline ?? undefined,
+          project: parsed.project,
+          // Only forward waiting_on when the operator explicitly passed it
+          // (undefined means "leave unchanged").
+          waitingOnReplace:
+            parsed.waiting_on !== undefined ? parsed.waiting_on : undefined,
+          logEntry: parsed.logEntry,
+        },
+        config.operator.teamMembers,
+      );
+      if (!result.ok) {
+        linearWarning = result.error;
+        logger.warn(
+          { id: updated.frontmatter.id, linear_id: updated.frontmatter.linear_id, error: result.error },
+          "linear update failed — vault still committed",
+        );
+      }
+    }
+
     const { committed, hash } = await commitAndPush(
       [path.join(vaultPath(), updated.relPath)],
       `task: update ${updated.frontmatter.id}`,
@@ -79,6 +148,7 @@ const dispatchers: Record<string, Dispatcher> = {
         committed,
         hash,
         task: updated.frontmatter,
+        linear_warning: linearWarning,
       }),
     };
   },
