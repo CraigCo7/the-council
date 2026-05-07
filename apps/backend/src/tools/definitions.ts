@@ -116,6 +116,18 @@ export function toolDefinitions(): Anthropic.Tool[] {
       input_schema: { type: "object", properties: {} },
     },
     {
+      name: "delete_task",
+      description:
+        "Drop / delete a single task by id. Removes the markdown file from the vault and archives the corresponding Linear issue (soft delete — recoverable from Linear UI). For \"drop the X task\" / \"delete the Y reminder\" / \"forget that\" intent. Resolve the id via list_tasks first if the operator referenced the task by description.",
+      input_schema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Task id like T-20260423-foo." },
+        },
+        required: ["id"],
+      },
+    },
+    {
       name: "propose_approval",
       description:
         "Enqueue a destructive operation (delete, bulk update, overwrite) for operator approval. Returns an approval id.",
