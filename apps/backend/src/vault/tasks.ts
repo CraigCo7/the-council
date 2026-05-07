@@ -108,22 +108,47 @@ export function updateTask(
   return { frontmatter: nextFm, body, relPath: existing.relPath };
 }
 
-export function listTasks(filter?: {
+export type TaskFilter = {
   status?: z.infer<typeof TaskStatus>[];
   project?: string;
   overdueAsOf?: string; // YYYY-MM-DD
-}): Task[] {
+  /** Case-insensitive substring match on `waiting_on`. Empty string is ignored. */
+  waitingOn?: string;
+  /** Only return tasks whose `deadline` is null. */
+  noDeadline?: boolean;
+};
+
+/**
+ * Pure predicate: does this task's frontmatter satisfy the filter?
+ *
+ * Extracted from `listTasks` so it can be unit-tested without spinning up
+ * a temp vault. The I/O orchestration in `listTasks` stays trivial — read
+ * each task, run this predicate, keep matches.
+ */
+export function matchesFilter(fm: TaskFrontmatter, filter?: TaskFilter): boolean {
+  if (!filter) return true;
+  if (filter.status && !filter.status.includes(fm.status)) return false;
+  if (filter.project && fm.project !== filter.project) return false;
+  if (filter.overdueAsOf) {
+    if (!fm.deadline || fm.deadline >= filter.overdueAsOf) return false;
+  }
+  if (filter.waitingOn) {
+    const needle = filter.waitingOn.trim().toLowerCase();
+    if (needle.length > 0) {
+      const wo = (fm.waiting_on ?? "").toLowerCase();
+      if (!wo.includes(needle)) return false;
+    }
+  }
+  if (filter.noDeadline && fm.deadline) return false;
+  return true;
+}
+
+export function listTasks(filter?: TaskFilter): Task[] {
   const files = listMarkdown(TASKS_DIR);
   const out: Task[] = [];
   for (const rel of files) {
     const { frontmatter, body } = readMarkdown<TaskFrontmatter>(rel);
-    if (filter?.status && !filter.status.includes(frontmatter.status)) continue;
-    if (filter?.project && frontmatter.project !== filter.project) continue;
-    if (filter?.overdueAsOf && frontmatter.deadline && frontmatter.deadline < filter.overdueAsOf) {
-      // overdue
-    } else if (filter?.overdueAsOf) {
-      continue;
-    }
+    if (!matchesFilter(frontmatter, filter)) continue;
     out.push({ frontmatter, body, relPath: rel });
   }
   return out;

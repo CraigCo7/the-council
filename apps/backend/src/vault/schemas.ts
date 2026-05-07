@@ -70,6 +70,7 @@ export const DailyBriefFrontmatter = z.object({
   generated_at: IsoDateTime,
   open_task_count: z.number().int().nonnegative(),
   overdue_count: z.number().int().nonnegative(),
+  no_deadline_count: z.number().int().nonnegative().default(0),
 });
 export type DailyBriefFrontmatter = z.infer<typeof DailyBriefFrontmatter>;
 

@@ -85,7 +85,8 @@ export function toolDefinitions(): Anthropic.Tool[] {
     },
     {
       name: "list_tasks",
-      description: "List open tasks, optionally filtered by project or status.",
+      description:
+        "List tasks, optionally filtered by project, status, the person they're waiting on, or whether they have no deadline. Use `waiting_on` for queries like \"what is Christian doing\" or \"what am I waiting on from Jake\" — the match is a case-insensitive substring against the task's waiting_on field, so partial names work.",
       input_schema: {
         type: "object",
         properties: {
@@ -96,6 +97,15 @@ export function toolDefinitions(): Anthropic.Tool[] {
               type: "string",
               enum: ["open", "in_progress", "blocked", "done", "dropped"],
             },
+          },
+          waiting_on: {
+            type: "string",
+            description:
+              "Case-insensitive substring match on the waiting_on field. Use the operator's wording (e.g. 'chris' matches 'Christian').",
+          },
+          no_deadline: {
+            type: "boolean",
+            description: "When true, only return tasks whose deadline is null.",
           },
         },
       },
