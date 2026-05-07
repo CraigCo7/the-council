@@ -5,7 +5,9 @@
   "type": "module",
   "description": "The Council — backend service.",
   "main": "dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
@@ -20,6 +22,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
+    "@linear/sdk": "^83.0.0",
     "better-sqlite3": "^11.3.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.0.0",

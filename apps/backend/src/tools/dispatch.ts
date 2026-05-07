@@ -12,6 +12,7 @@ import path from "node:path";
 import { enqueue } from "../approvals/queue.js";
 import { consultStrategicAnalyst } from "../agents/strategic-analyst.js";
 import { toLocalISODate } from "../vault/time.js";
+import { listLinearIssues } from "../linear/listIssues.js";
 import { logger } from "../logger.js";
 
 export type ToolResult = { content: string; is_error?: boolean };
@@ -107,21 +108,33 @@ const dispatchers: Record<string, Dispatcher> = {
     // If the operator didn't specify status, default to open work — anything
     // closed is rarely what "what's X doing" or "no deadline" queries want.
     if (!parsed.status) filter.status = ["open", "in_progress", "blocked"];
-    const tasks = listTasks(filter);
-    return {
-      content: JSON.stringify(
-        tasks.map((t) => ({
-          id: t.frontmatter.id,
-          title: t.frontmatter.title,
-          project: t.frontmatter.project,
-          priority: t.frontmatter.priority,
-          status: t.frontmatter.status,
-          deadline: t.frontmatter.deadline ?? null,
-          type: t.frontmatter.type,
-          waiting_on: t.frontmatter.waiting_on ?? null,
-        })),
-      ),
-    };
+
+    // Fetch from both sources in parallel. Linear returns [] if disabled
+    // or if the API errored — vault results still flow through.
+    const [vaultTasks, linearRows] = await Promise.all([
+      Promise.resolve(listTasks(filter)),
+      listLinearIssues({
+        project: filter.project,
+        status: filter.status,
+        waitingOn: filter.waitingOn,
+        noDeadline: filter.noDeadline,
+      }),
+    ]);
+
+    const vaultRows = vaultTasks.map((t) => ({
+      source: "vault" as const,
+      id: t.frontmatter.id,
+      title: t.frontmatter.title,
+      project: t.frontmatter.project,
+      priority: t.frontmatter.priority,
+      status: t.frontmatter.status,
+      deadline: t.frontmatter.deadline ?? null,
+      type: t.frontmatter.type,
+      waiting_on: t.frontmatter.waiting_on ?? null,
+      url: null as string | null,
+    }));
+
+    return { content: JSON.stringify([...vaultRows, ...linearRows]) };
   },
 
   list_overdue: async () => {
