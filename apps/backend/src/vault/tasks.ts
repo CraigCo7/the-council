@@ -8,7 +8,7 @@ import {
   TaskType,
   Priority,
 } from "./schemas.js";
-import { exists, listMarkdown, readMarkdown, slugify, writeMarkdown } from "./fs.js";
+import { deleteFile, exists, listMarkdown, readMarkdown, slugify, writeMarkdown } from "./fs.js";
 import { compactDate, toLocalISODateTime } from "./time.js";
 
 const TASKS_DIR = "02-Tasks";
@@ -152,6 +152,19 @@ export function listTasks(filter?: TaskFilter): Task[] {
     out.push({ frontmatter, body, relPath: rel });
   }
   return out;
+}
+
+/**
+ * Delete a task by id. Reads the existing task first so the caller has
+ * a snapshot of what was deleted (for receipts, Linear archive, etc.).
+ * Returns null if the task doesn't exist. The caller is responsible for
+ * git commit + push of the removal.
+ */
+export function deleteTask(id: string): Task | null {
+  const existing = readTask(id);
+  if (!existing) return null;
+  deleteFile(existing.relPath);
+  return existing;
 }
 
 export function openTasks(): Task[] {

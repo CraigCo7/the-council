@@ -120,7 +120,11 @@ export function stripModelReceipts(text: string): string {
   let stripped = 0;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("✓ Captured:") || trimmed.startsWith("✓ Updated:")) {
+    if (
+      trimmed.startsWith("✓ Captured:") ||
+      trimmed.startsWith("✓ Updated:") ||
+      trimmed.startsWith("✓ Dropped:")
+    ) {
       stripped++;
       continue;
     }
@@ -149,7 +153,13 @@ export function stripModelReceipts(text: string): string {
  */
 export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | null {
   if (call.is_error) return null;
-  if (call.name !== "create_task" && call.name !== "update_task") return null;
+  if (
+    call.name !== "create_task" &&
+    call.name !== "update_task" &&
+    call.name !== "delete_task"
+  ) {
+    return null;
+  }
 
   let parsed: unknown;
   try {
@@ -177,7 +187,12 @@ export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | nul
   // operator sees `· reminder` in the receipt and knows to correct it.
   const typeTag = taskType && taskType !== "task" ? ` · ${taskType}` : "";
 
-  const verb = call.name === "create_task" ? "Captured" : "Updated";
+  const verb =
+    call.name === "create_task"
+      ? "Captured"
+      : call.name === "update_task"
+        ? "Updated"
+        : "Dropped";
   const base = `✓ ${verb}: ${title} [${project} · ${priority} · ${deadline}${typeTag}]`;
   // Render the Linear identifier as a Markdown link when both id and url
   // are present — the messenger (Telegram) converts `[text](url)` → an

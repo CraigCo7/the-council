@@ -52,6 +52,28 @@ const successfulUpdate = (overrides: Partial<Record<string, unknown>> = {}): Too
   is_error: false,
 });
 
+const successfulDelete = (overrides: Partial<Record<string, unknown>> = {}): ToolCall => ({
+  name: "delete_task",
+  input: {},
+  result: JSON.stringify({
+    ok: true,
+    id: "T-20260506-buy-milk",
+    committed: true,
+    hash: "ghi789",
+    task: {
+      id: "T-20260506-buy-milk",
+      title: "Buy milk",
+      project: "Personal",
+      priority: "P2",
+      status: "open",
+      type: "task",
+      deadline: null,
+      ...overrides,
+    },
+  }),
+  is_error: false,
+});
+
 const failedCreate: ToolCall = {
   name: "create_task",
   input: {},
@@ -179,6 +201,41 @@ describe("receiptFor", () => {
       "✓ Captured: Buy milk [Personal · P2 · no deadline · delegated] [CNCL-3](https://linear.app/foo/issue/CNCL-3)",
     );
   });
+
+  it("renders ✓ Dropped: for a successful delete_task", () => {
+    expect(receiptFor(successfulDelete())).toBe(
+      "✓ Dropped: Buy milk [Personal · P2 · no deadline]",
+    );
+  });
+
+  it("includes type tag in dropped receipt for non-default types", () => {
+    expect(receiptFor(successfulDelete({ type: "reminder" }))).toBe(
+      "✓ Dropped: Buy milk [Personal · P2 · no deadline · reminder]",
+    );
+  });
+
+  it("includes Linear link in dropped receipt when linear_id was set", () => {
+    expect(
+      receiptFor(
+        successfulDelete({
+          linear_id: "CNCL-9",
+          linear_url: "https://linear.app/foo/issue/CNCL-9",
+        }),
+      ),
+    ).toBe(
+      "✓ Dropped: Buy milk [Personal · P2 · no deadline] [CNCL-9](https://linear.app/foo/issue/CNCL-9)",
+    );
+  });
+
+  it("returns null on errored delete_task", () => {
+    const errored: ToolCall = {
+      name: "delete_task",
+      input: {},
+      result: JSON.stringify({ ok: false, error: "task not found" }),
+      is_error: true,
+    };
+    expect(receiptFor(errored)).toBeNull();
+  });
 });
 
 describe("stripModelReceipts", () => {
@@ -188,6 +245,10 @@ describe("stripModelReceipts", () => {
 
   it("strips a single ✓ Updated line", () => {
     expect(stripModelReceipts("✓ Updated: Buy milk")).toBe("");
+  });
+
+  it("strips a single ✓ Dropped line", () => {
+    expect(stripModelReceipts("✓ Dropped: Buy milk")).toBe("");
   });
 
   it("preserves other lines", () => {

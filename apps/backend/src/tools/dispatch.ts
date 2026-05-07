@@ -3,6 +3,7 @@ import { ProjectEnum, TagListOptional, TaskType } from "../vault/schemas.js";
 import {
   CreateTaskInput,
   createTask,
+  deleteTask,
   listTasks,
   overdueTasks,
   updateTask,
@@ -15,6 +16,7 @@ import { toLocalISODate } from "../vault/time.js";
 import { listLinearIssues } from "../linear/listIssues.js";
 import { createLinearIssue, shouldMirrorToLinear } from "../linear/createIssue.js";
 import { updateLinearIssue } from "../linear/updateIssue.js";
+import { archiveLinearIssue } from "../linear/archiveIssue.js";
 import { linearEnabled } from "../linear/client.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
@@ -205,6 +207,52 @@ const dispatchers: Record<string, Dispatcher> = {
     }));
 
     return { content: JSON.stringify([...vaultRows, ...linearRows]) };
+  },
+
+  delete_task: async (raw) => {
+    const parsed = z.object({ id: z.string() }).parse(raw);
+    await syncPull();
+    // Snapshot before delete so the receipt has data to render. The
+    // Task object includes `frontmatter` (title, project, etc.) and
+    // `linear_id` for Linear archive.
+    const deleted = deleteTask(parsed.id);
+    if (!deleted) {
+      return {
+        content: JSON.stringify({ ok: false, error: "task not found", id: parsed.id }),
+        is_error: true,
+      };
+    }
+
+    // Archive the Linear counterpart, if any. Vault is canonical; Linear
+    // archive failure is logged + surfaced but doesn't fail the delete.
+    let linearWarning: string | null = null;
+    if (linearEnabled() && deleted.frontmatter.linear_id) {
+      const result = await archiveLinearIssue(deleted.frontmatter.linear_id);
+      if (!result.ok) {
+        linearWarning = result.error;
+        logger.warn(
+          { id: deleted.frontmatter.id, linear_id: deleted.frontmatter.linear_id, error: result.error },
+          "linear archive failed — vault delete still committed",
+        );
+      }
+    }
+
+    const { committed, hash } = await commitAndPush(
+      [path.join(vaultPath(), deleted.relPath)],
+      `task: drop ${deleted.frontmatter.id} — ${deleted.frontmatter.title}`,
+    );
+    return {
+      content: JSON.stringify({
+        ok: true,
+        id: deleted.frontmatter.id,
+        committed,
+        hash,
+        // The receipt synthesizer reads `task` to render `✓ Dropped: ...`.
+        // Same field name as create/update so receiptFor can handle all three.
+        task: deleted.frontmatter,
+        linear_warning: linearWarning,
+      }),
+    };
   },
 
   list_overdue: async () => {

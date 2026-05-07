@@ -45,6 +45,16 @@ export function writeMarkdown(
   writeText(relPath, file);
 }
 
+/**
+ * Delete a file from the vault. No-op if the file doesn't exist.
+ * Used by the delete_task path; commitAndPush picks up the removal as a
+ * normal git operation.
+ */
+export function deleteFile(relPath: string): void {
+  const full = vaultResolve(relPath);
+  if (fs.existsSync(full)) fs.unlinkSync(full);
+}
+
 export function listMarkdown(relDir: string): string[] {
   const full = vaultResolve(relDir);
   if (!fs.existsSync(full)) return [];
