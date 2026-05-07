@@ -166,10 +166,19 @@ export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | nul
   const project = String(t.project ?? "").trim();
   const priority = String(t.priority ?? "").trim();
   const deadline = t.deadline ? String(t.deadline) : "no deadline";
+  const linearId = t.linear_id ? String(t.linear_id).trim() : "";
+  const linearUrl = t.linear_url ? String(t.linear_url).trim() : "";
   if (!title || !project || !priority) return null;
 
   const verb = call.name === "create_task" ? "Captured" : "Updated";
-  return `✓ ${verb}: ${title} [${project} · ${priority} · ${deadline}]`;
+  const base = `✓ ${verb}: ${title} [${project} · ${priority} · ${deadline}]`;
+  // Render the Linear identifier as a Markdown link when both id and url
+  // are present — the messenger (Telegram) converts `[text](url)` → an
+  // HTML anchor before send. If only the id is present (URL building
+  // failed somehow), include it bare so the operator at least sees it.
+  if (linearId && linearUrl) return `${base} [${linearId}](${linearUrl})`;
+  if (linearId) return `${base} ${linearId}`;
+  return base;
 }
 
 /**

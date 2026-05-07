@@ -69,6 +69,28 @@ describe("mdToTelegramHtml", () => {
   it("escapes inside code blocks too — content stays literal", () => {
     expect(mdToTelegramHtml("`<3>`")).toBe("<code>&lt;3&gt;</code>");
   });
+
+  it("converts markdown links to HTML anchors", () => {
+    expect(
+      mdToTelegramHtml("See [CNCL-42](https://linear.app/foo/issue/CNCL-42)"),
+    ).toBe('See <a href="https://linear.app/foo/issue/CNCL-42">CNCL-42</a>');
+  });
+
+  it("preserves URL ampersands as HTML entities (valid inside href)", () => {
+    expect(
+      mdToTelegramHtml("[link](https://example.com/?a=1&b=2)"),
+    ).toBe('<a href="https://example.com/?a=1&amp;b=2">link</a>');
+  });
+
+  it("does not match a malformed link where ] is missing", () => {
+    expect(mdToTelegramHtml("[no closing bracket(url)")).toBe(
+      "[no closing bracket(url)",
+    );
+  });
+
+  it("does not match across newlines (link must be on one line)", () => {
+    expect(mdToTelegramHtml("[text\n](url)")).toBe("[text\n](url)");
+  });
 });
 
 describe("humanizeDates", () => {

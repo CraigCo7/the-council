@@ -23,7 +23,12 @@ export function mdToTelegramHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>")
-    .replace(/`([^`\n]+?)`/g, "<code>$1</code>");
+    .replace(/`([^`\n]+?)`/g, "<code>$1</code>")
+    // Markdown links → HTML anchors. Ampersands inside the URL have
+    // already been escaped to `&amp;` (which is valid in href). The
+    // regex requires balanced [ ] and ( ); pathological inputs (e.g.
+    // a `]` inside the link text) won't match and pass through.
+    .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
 }
 
 const MONTHS = [

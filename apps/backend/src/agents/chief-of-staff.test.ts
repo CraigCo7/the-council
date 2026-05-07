@@ -106,6 +106,40 @@ describe("receiptFor", () => {
       }),
     ).toBeNull();
   });
+
+  it("appends a markdown link when linear_id and linear_url are both present", () => {
+    const r = receiptFor(
+      successfulCreate({
+        linear_id: "CNCL-42",
+        linear_url: "https://linear.app/the-council-alfred/issue/CNCL-42",
+      }),
+    );
+    expect(r).toBe(
+      "✓ Captured: Buy milk [Personal · P2 · no deadline] [CNCL-42](https://linear.app/the-council-alfred/issue/CNCL-42)",
+    );
+  });
+
+  it("appends bare identifier when linear_id is set but url is missing", () => {
+    const r = receiptFor(successfulCreate({ linear_id: "CNCL-42", linear_url: null }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline] CNCL-42");
+  });
+
+  it("renders the same way for ✓ Updated", () => {
+    const r = receiptFor(
+      successfulUpdate({
+        linear_id: "CNCL-42",
+        linear_url: "https://linear.app/foo/issue/CNCL-42",
+      }),
+    );
+    expect(r).toBe(
+      "✓ Updated: Buy milk [Personal · P1 · 2026-05-15] [CNCL-42](https://linear.app/foo/issue/CNCL-42)",
+    );
+  });
+
+  it("falls back to the base format when neither linear field is present", () => {
+    const r = receiptFor(successfulCreate());
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]");
+  });
 });
 
 describe("stripModelReceipts", () => {
