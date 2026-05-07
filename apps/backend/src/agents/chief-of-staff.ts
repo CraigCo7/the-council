@@ -166,12 +166,19 @@ export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | nul
   const project = String(t.project ?? "").trim();
   const priority = String(t.priority ?? "").trim();
   const deadline = t.deadline ? String(t.deadline) : "no deadline";
+  const taskType = t.type ? String(t.type).trim() : "";
   const linearId = t.linear_id ? String(t.linear_id).trim() : "";
   const linearUrl = t.linear_url ? String(t.linear_url).trim() : "";
   if (!title || !project || !priority) return null;
 
+  // Surface the type when it's NOT the default `task`. Visible types
+  // (`reminder`, `delegated`, `waiting-for`, `idea`) make misclassifications
+  // self-diagnosable: if Alfred captured a study task as a reminder, the
+  // operator sees `· reminder` in the receipt and knows to correct it.
+  const typeTag = taskType && taskType !== "task" ? ` · ${taskType}` : "";
+
   const verb = call.name === "create_task" ? "Captured" : "Updated";
-  const base = `✓ ${verb}: ${title} [${project} · ${priority} · ${deadline}]`;
+  const base = `✓ ${verb}: ${title} [${project} · ${priority} · ${deadline}${typeTag}]`;
   // Render the Linear identifier as a Markdown link when both id and url
   // are present — the messenger (Telegram) converts `[text](url)` → an
   // HTML anchor before send. If only the id is present (URL building

@@ -140,6 +140,45 @@ describe("receiptFor", () => {
     const r = receiptFor(successfulCreate());
     expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]");
   });
+
+  it("hides type when it's the default `task`", () => {
+    const r = receiptFor(successfulCreate({ type: "task" }));
+    // No "· task" appended
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]");
+  });
+
+  it("surfaces type when it's reminder (operator can spot misclassifications)", () => {
+    const r = receiptFor(successfulCreate({ type: "reminder" }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline · reminder]");
+  });
+
+  it("surfaces type when it's delegated", () => {
+    const r = receiptFor(successfulCreate({ type: "delegated" }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline · delegated]");
+  });
+
+  it("surfaces type when it's waiting-for", () => {
+    const r = receiptFor(successfulCreate({ type: "waiting-for" }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline · waiting-for]");
+  });
+
+  it("surfaces type when it's idea", () => {
+    const r = receiptFor(successfulCreate({ type: "idea" }));
+    expect(r).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline · idea]");
+  });
+
+  it("type tag appears BEFORE the linear link suffix", () => {
+    const r = receiptFor(
+      successfulCreate({
+        type: "delegated",
+        linear_id: "CNCL-3",
+        linear_url: "https://linear.app/foo/issue/CNCL-3",
+      }),
+    );
+    expect(r).toBe(
+      "✓ Captured: Buy milk [Personal · P2 · no deadline · delegated] [CNCL-3](https://linear.app/foo/issue/CNCL-3)",
+    );
+  });
 });
 
 describe("stripModelReceipts", () => {
