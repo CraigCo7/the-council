@@ -114,7 +114,7 @@ function textFromContent(content: Anthropic.ContentBlock[]): string {
  *
  * Returns the text with receipt-prefixed lines removed.
  */
-export function stripModelReceipts(text: string): string {
+export function stripModelReceipts(text: string): { remaining: string; strippedCount: number } {
   const lines = text.split("\n");
   const kept: string[] = [];
   let stripped = 0;
@@ -136,7 +136,7 @@ export function stripModelReceipts(text: string): string {
       "stripped model-written receipt prefix — receipts are now code-generated",
     );
   }
-  return kept.join("\n").trim();
+  return { remaining: kept.join("\n").trim(), strippedCount: stripped };
 }
 
 /**
@@ -218,7 +218,23 @@ export function composeFinalText(
     .map(receiptFor)
     .filter((r): r is string => r !== null);
 
-  const commentary = stripModelReceipts(modelText);
+  const { remaining: commentary, strippedCount } = stripModelReceipts(modelText);
+
+  // Phantom-receipt fallback: the model wrote a `✓ Captured/Updated/Dropped`
+  // line WITHOUT actually calling the corresponding tool. We strip the
+  // forgery; if there's nothing else (no commentary, no real tool result
+  // to synthesize from), the operator would otherwise get an empty message
+  // and Telegram would 400. Emit a meta-message so the failure is visible
+  // and the operator knows to retry.
+  if (receipts.length === 0 && commentary.length === 0) {
+    if (strippedCount > 0) {
+      return "(Council) I claimed to capture or update something but didn't actually call the tool. Re-issue the request.";
+    }
+    // Model produced genuinely nothing — neither receipt nor commentary —
+    // and no tool ran. Rare but real (e.g. model returned an empty
+    // text block). Same operator-visible failure mode.
+    return "(Council) I had nothing to say in response. Re-phrase the request.";
+  }
 
   if (receipts.length === 0) return commentary;
   if (commentary.length === 0) return receipts.join("\n");

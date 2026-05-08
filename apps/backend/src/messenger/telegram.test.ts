@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mdToTelegramHtml, humanizeDates } from "./telegram.js";
+import { mdToTelegramHtml, humanizeDates, sendTelegram } from "./telegram.js";
 
 describe("mdToTelegramHtml", () => {
   it("converts double-asterisk bold to <b>", () => {
@@ -150,5 +150,15 @@ describe("humanizeDates", () => {
     expect(humanizeDates("**Name:** Buy milk\nProject: Personal")).toBe(
       "**Name:** Buy milk\nProject: Personal",
     );
+  });
+});
+
+describe("sendTelegram empty-text guard", () => {
+  it("rejects empty text rather than asking Telegram to send it", async () => {
+    await expect(sendTelegram("")).rejects.toThrow("refusing to send empty message");
+  });
+
+  it("rejects whitespace-only text", async () => {
+    await expect(sendTelegram("   \n  \t  ")).rejects.toThrow("refusing to send empty message");
   });
 });

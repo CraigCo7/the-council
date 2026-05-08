@@ -240,32 +240,47 @@ describe("receiptFor", () => {
 
 describe("stripModelReceipts", () => {
   it("strips a single ✓ Captured line", () => {
-    expect(stripModelReceipts("✓ Captured: Buy milk")).toBe("");
+    const r = stripModelReceipts("✓ Captured: Buy milk");
+    expect(r.remaining).toBe("");
+    expect(r.strippedCount).toBe(1);
   });
 
   it("strips a single ✓ Updated line", () => {
-    expect(stripModelReceipts("✓ Updated: Buy milk")).toBe("");
+    const r = stripModelReceipts("✓ Updated: Buy milk");
+    expect(r.remaining).toBe("");
+    expect(r.strippedCount).toBe(1);
   });
 
   it("strips a single ✓ Dropped line", () => {
-    expect(stripModelReceipts("✓ Dropped: Buy milk")).toBe("");
+    const r = stripModelReceipts("✓ Dropped: Buy milk");
+    expect(r.remaining).toBe("");
+    expect(r.strippedCount).toBe(1);
   });
 
   it("preserves other lines", () => {
     const input = ["✓ Captured: Buy milk", "", "Note: heads up about a conflict."].join("\n");
-    expect(stripModelReceipts(input)).toBe("Note: heads up about a conflict.");
+    const r = stripModelReceipts(input);
+    expect(r.remaining).toBe("Note: heads up about a conflict.");
+    expect(r.strippedCount).toBe(1);
   });
 
   it("does not strip a prefix mid-sentence", () => {
-    expect(stripModelReceipts("After capture I'll mark ✓ Captured: as the result.")).toBe(
-      "After capture I'll mark ✓ Captured: as the result.",
-    );
+    const r = stripModelReceipts("After capture I'll mark ✓ Captured: as the result.");
+    expect(r.remaining).toBe("After capture I'll mark ✓ Captured: as the result.");
+    expect(r.strippedCount).toBe(0);
   });
 
   it("returns input unchanged when no receipts are present", () => {
-    expect(stripModelReceipts("Plain commentary about the task.")).toBe(
-      "Plain commentary about the task.",
-    );
+    const r = stripModelReceipts("Plain commentary about the task.");
+    expect(r.remaining).toBe("Plain commentary about the task.");
+    expect(r.strippedCount).toBe(0);
+  });
+
+  it("counts multiple stripped lines", () => {
+    const input = ["✓ Captured: A", "✓ Updated: B", "real commentary"].join("\n");
+    const r = stripModelReceipts(input);
+    expect(r.remaining).toBe("real commentary");
+    expect(r.strippedCount).toBe(2);
   });
 });
 
@@ -293,8 +308,27 @@ describe("composeFinalText", () => {
     );
   });
 
-  it("strips a forged receipt even when no real tool call ran (drift defense)", () => {
-    expect(composeFinalText("✓ Captured: Buy milk", [])).toBe("");
+  it("returns the phantom-receipt meta-message when forged receipt is the only thing the model wrote", () => {
+    // Model wrote `✓ Captured:` without calling create_task. We strip it,
+    // and the operator would otherwise get an empty Telegram message.
+    // Surface a meta-failure instead so the operator knows to retry.
+    const out = composeFinalText("✓ Captured: Buy milk", []);
+    expect(out).toContain("(Council)");
+    expect(out).toContain("didn't actually call the tool");
+    expect(out).not.toContain("✓ Captured:");
+  });
+
+  it("returns a meta-message when model produced empty output AND no tools ran", () => {
+    const out = composeFinalText("", []);
+    expect(out).toContain("(Council)");
+    expect(out).toContain("nothing to say");
+  });
+
+  it("preserves commentary even when receipt was forged and stripped", () => {
+    // Mixed case: model wrote a forged receipt + real commentary about
+    // an inference. Strip the receipt; preserve the commentary.
+    const out = composeFinalText("✓ Captured: Buy milk\n\nNote: defaulted to Personal.", []);
+    expect(out).toBe("Note: defaulted to Personal.");
   });
 
   it("handles multiple successful tool calls in one turn (one receipt each)", () => {
