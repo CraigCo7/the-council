@@ -101,6 +101,11 @@ export async function createLinearIssue(input: CreateLinearInput): Promise<Creat
       dueDate: input.deadline ?? undefined,
       labelIds: labelIds.length > 0 ? labelIds : undefined,
       stateId,
+      // Auto-assign every bot-created issue to the operator. Combined
+      // with the employee label (for delegated tasks), this means the
+      // operator's "My Issues" view in Linear is comprehensive while
+      // the labels still flag who's actually doing the work.
+      assigneeId: lookups.operatorUserId,
     });
 
     if (!result.success) {

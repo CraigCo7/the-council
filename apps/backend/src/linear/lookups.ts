@@ -16,6 +16,14 @@ import { linearClient, linearEnabled } from "./client.js";
 
 type LookupCache = {
   teamId: string;
+  /**
+   * Linear user ID of the API key owner. Resolved from `client.viewer`
+   * at lookup-load time. Used to auto-assign every bot-created issue to
+   * the operator so their "My Issues" view in Linear is comprehensive.
+   * (Employee labels still flag who's actually doing the work for
+   * delegated tasks.)
+   */
+  operatorUserId: string;
   projectIdsByName: Map<string, string>;
   labelIdsByName: Map<string, string>;
   workflowStateIdsByName: Map<string, string>;
@@ -52,8 +60,12 @@ async function loadLookups(): Promise<LookupCache> {
   const client = linearClient();
   if (!client) throw new Error("linear client unavailable");
 
-  // Find the team by key
-  const teams = await client.teams({ filter: { key: { eq: config.linear.teamKey } } });
+  // Find the team by key, in parallel with resolving the operator's
+  // user ID from the API key.
+  const [teams, viewer] = await Promise.all([
+    client.teams({ filter: { key: { eq: config.linear.teamKey } } }),
+    client.viewer,
+  ]);
   const team = teams.nodes[0];
   if (!team) {
     throw new Error(`linear team not found for key '${config.linear.teamKey}'`);
@@ -81,6 +93,8 @@ async function loadLookups(): Promise<LookupCache> {
     {
       team: team.key,
       teamId: team.id,
+      operator: viewer.displayName ?? viewer.name,
+      operatorUserId: viewer.id,
       projects: projects.nodes.length,
       labels: labels.nodes.length,
       states: states.nodes.length,
@@ -90,6 +104,7 @@ async function loadLookups(): Promise<LookupCache> {
 
   return {
     teamId: team.id,
+    operatorUserId: viewer.id,
     projectIdsByName,
     labelIdsByName,
     workflowStateIdsByName,
