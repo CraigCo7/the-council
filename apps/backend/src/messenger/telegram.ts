@@ -85,6 +85,15 @@ export function humanizeDates(text: string): string {
  * Docs: https://core.telegram.org/bots/api#sendmessage
  */
 export async function sendTelegram(text: string): Promise<void> {
+  // Precondition: never ask Telegram to send empty text. It returns 400
+  // "message text is empty" and the operator gets nothing on their phone.
+  // This usually means upstream (composeFinalText) stripped everything;
+  // the failure was already a noticed event, don't compound it with an
+  // API crash. Run this check FIRST so it fires regardless of config.
+  if (!text || text.trim().length === 0) {
+    throw new Error("sendTelegram: refusing to send empty message");
+  }
+
   if (!config.telegram.enabled) {
     throw new Error("Telegram is disabled — set TELEGRAM_ENABLED=true and provide bot credentials.");
   }
