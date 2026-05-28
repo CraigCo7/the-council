@@ -1,11 +1,31 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Shared mock fns, hoisted above the vi.mock factories that reference them.
+const { createMock, dispatchMock } = vi.hoisted(() => ({
+  createMock: vi.fn(),
+  dispatchMock: vi.fn(),
+}));
+
+vi.mock("../llm/anthropic.js", () => ({
+  anthropic: { messages: { create: createMock } },
+  defaultsFor: () => ({ model: "test-model", max_tokens: 4000 }),
+  logUsage: () => {},
+}));
+vi.mock("../tools/dispatch.js", () => ({ dispatchTool: dispatchMock }));
+vi.mock("../tools/definitions.js", () => ({ toolDefinitions: () => [] }));
+vi.mock("./prompt-loader.js", () => ({ loadPrompt: () => "SYSTEM PROMPT" }));
+
 import {
   composeFinalText,
+  isForgedWithoutBackingCall,
   receiptFor,
+  runChiefOfStaff,
   stripModelReceipts,
 } from "./chief-of-staff.js";
 
 type ToolCall = { name: string; input: unknown; result: string; is_error?: boolean };
+
+const USAGE = { input_tokens: 1, output_tokens: 1 };
 
 const successfulCreate = (overrides: Partial<Record<string, unknown>> = {}): ToolCall => ({
   name: "create_task",
@@ -343,5 +363,118 @@ describe("composeFinalText", () => {
 
   it("does not synthesize a receipt when the tool errored", () => {
     expect(composeFinalText("Vault is offline.", [failedCreate])).toBe("Vault is offline.");
+  });
+});
+
+describe("isForgedWithoutBackingCall", () => {
+  it("is true when a receipt was written but no tool ran", () => {
+    expect(isForgedWithoutBackingCall("✓ Captured: Buy milk", [])).toBe(true);
+  });
+
+  it("is true when a receipt was written but only a read tool ran", () => {
+    expect(isForgedWithoutBackingCall("✓ Updated: Buy milk", [listOnly])).toBe(true);
+  });
+
+  it("is true when the backing write tool errored (receipt still unbacked)", () => {
+    expect(isForgedWithoutBackingCall("✓ Captured: Buy milk", [failedCreate])).toBe(true);
+  });
+
+  it("is false when a successful write tool backs the receipt", () => {
+    expect(isForgedWithoutBackingCall("✓ Captured: Buy milk", [successfulCreate()])).toBe(false);
+  });
+
+  it("is false when the model wrote no receipt line at all", () => {
+    expect(isForgedWithoutBackingCall("Here are your overdue tasks.", [])).toBe(false);
+  });
+});
+
+describe("runChiefOfStaff phantom-receipt recovery", () => {
+  beforeEach(() => {
+    createMock.mockReset();
+    dispatchMock.mockReset();
+  });
+
+  it("forces a tool call after a forged receipt, so the capture actually lands", async () => {
+    // Turn 1: model forges a receipt with no tool call.
+    createMock.mockResolvedValueOnce({
+      stop_reason: "end_turn",
+      usage: USAGE,
+      content: [{ type: "text", text: "✓ Captured: Buy milk [Personal · P2 · no deadline]" }],
+    });
+    // Turn 2 (forced): model actually calls create_task.
+    createMock.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      usage: USAGE,
+      content: [{ type: "tool_use", id: "tu1", name: "create_task", input: { title: "Buy milk" } }],
+    });
+    // Turn 3: model ends with nothing to add; the real receipt is synthesized.
+    createMock.mockResolvedValueOnce({
+      stop_reason: "end_turn",
+      usage: USAGE,
+      content: [{ type: "text", text: "" }],
+    });
+    dispatchMock.mockResolvedValueOnce({
+      content: JSON.stringify({
+        ok: true,
+        task: { title: "Buy milk", project: "Personal", priority: "P2", deadline: null, type: "task" },
+      }),
+      is_error: false,
+    });
+
+    const out = await runChiefOfStaff({ userMessage: "remember to buy milk" });
+
+    expect(out.text).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]");
+    expect(dispatchMock).toHaveBeenCalledTimes(1);
+    expect(dispatchMock).toHaveBeenCalledWith("create_task", { title: "Buy milk" });
+    expect(createMock).toHaveBeenCalledTimes(3);
+    // The retry request forces a tool call; the first and last do not.
+    expect(createMock.mock.calls[0][0].tool_choice).toBeUndefined();
+    expect(createMock.mock.calls[1][0].tool_choice).toEqual({ type: "any" });
+    expect(createMock.mock.calls[2][0].tool_choice).toBeUndefined();
+  });
+
+  it("does not retry when a genuine capture happened in one turn", async () => {
+    createMock.mockResolvedValueOnce({
+      stop_reason: "tool_use",
+      usage: USAGE,
+      content: [{ type: "tool_use", id: "tu1", name: "create_task", input: { title: "Buy milk" } }],
+    });
+    createMock.mockResolvedValueOnce({
+      stop_reason: "end_turn",
+      usage: USAGE,
+      content: [{ type: "text", text: "" }],
+    });
+    dispatchMock.mockResolvedValueOnce({
+      content: JSON.stringify({
+        ok: true,
+        task: { title: "Buy milk", project: "Personal", priority: "P2", deadline: null, type: "task" },
+      }),
+      is_error: false,
+    });
+
+    const out = await runChiefOfStaff({ userMessage: "remember to buy milk" });
+
+    expect(out.text).toBe("✓ Captured: Buy milk [Personal · P2 · no deadline]");
+    expect(createMock).toHaveBeenCalledTimes(2);
+    expect(createMock.mock.calls.every((c) => c[0].tool_choice === undefined)).toBe(true);
+  });
+
+  it("gives up after MAX_FORGE_RETRIES and surfaces the meta-failure rather than looping forever", async () => {
+    // The model forges on every turn, even when forced. tool_choice:any would
+    // normally guarantee a tool_use, but we simulate a stubborn model to prove
+    // the retry budget is bounded and the operator still gets a visible signal.
+    createMock.mockResolvedValue({
+      stop_reason: "end_turn",
+      usage: USAGE,
+      content: [{ type: "text", text: "✓ Captured: Buy milk [Personal · P2 · no deadline]" }],
+    });
+
+    const out = await runChiefOfStaff({ userMessage: "remember to buy milk" });
+
+    // 1 initial + 2 forced retries = 3 calls, then it returns the fallback.
+    expect(createMock).toHaveBeenCalledTimes(3);
+    expect(dispatchMock).not.toHaveBeenCalled();
+    expect(out.text).toContain("(Council)");
+    expect(out.text).toContain("didn't actually call the tool");
   });
 });

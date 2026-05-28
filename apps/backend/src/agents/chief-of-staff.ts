@@ -7,6 +7,29 @@ import { logger } from "../logger.js";
 
 const MAX_ITERATIONS = 8;
 
+// How many times we'll re-prompt + force a tool call after catching the model
+// forging a receipt without the backing tool call. Two gives margin if the
+// first forced turn spends itself on a read tool (e.g. list_tasks to resolve
+// an id) before the real write. MAX_ITERATIONS still bounds the overall loop.
+const MAX_FORGE_RETRIES = 2;
+
+// Tools whose successful result is what a `✓ Captured/Updated/Dropped` receipt
+// is supposed to confirm. A forged receipt with none of these in the turn is a
+// claim about work that never happened.
+const WRITE_TOOLS = new Set(["create_task", "update_task", "delete_task"]);
+
+// Injected when the model ends its turn having written a confirmation line but
+// never calling the tool. The next request forces a tool call (tool_choice:
+// any), so the capture the operator asked for actually lands instead of being
+// silently dropped behind a fake receipt.
+const FORGED_RECEIPT_NUDGE =
+  "You wrote a confirmation line (✓ Captured / ✓ Updated / ✓ Dropped) but did NOT " +
+  "call the tool, so nothing was persisted — the confirmation is a fabrication. " +
+  "Call the correct tool now (create_task / update_task / delete_task) with the " +
+  "details you intended to record. If you must resolve a task id first, call " +
+  "list_tasks. Do not write the confirmation line yourself; the system writes it " +
+  "from the real tool result.";
+
 export type ChiefInput = {
   userMessage: string;
   conversationId?: string;
@@ -47,13 +70,20 @@ export async function runChiefOfStaff(input: ChiefInput): Promise<ChiefOutput> {
   const toolCalls: ChiefOutput["toolCalls"] = [];
   let totals = { input_tokens: 0, output_tokens: 0, cache_read: 0, cache_create: 0 };
 
+  // Set after we catch a forged receipt; forces a tool call on the very next
+  // request so the model can't end the turn with another fabrication.
+  let forceToolUse = false;
+  let forgeRetries = 0;
+
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     const response = await anthropic.messages.create({
       ...defaults,
       system,
       tools,
+      ...(forceToolUse ? { tool_choice: { type: "any" as const } } : {}),
       messages,
     });
+    forceToolUse = false;
     logUsage(`chief-of-staff:iter${i}`, defaults.model, response.usage);
     totals.input_tokens += response.usage.input_tokens;
     totals.output_tokens += response.usage.output_tokens;
@@ -63,7 +93,26 @@ export async function runChiefOfStaff(input: ChiefInput): Promise<ChiefOutput> {
     messages.push({ role: "assistant", content: response.content });
 
     if (response.stop_reason === "end_turn") {
-      const text = composeFinalText(textFromContent(response.content), toolCalls);
+      const modelText = textFromContent(response.content);
+
+      // Phantom-receipt recovery: the model claimed to capture/update/drop
+      // something but never called the tool, so nothing was persisted.
+      // Rather than surface the meta-failure and lose the operator's request,
+      // re-prompt and FORCE a tool call on the retry so the work actually
+      // lands. composeFinalText's fallback remains the last-resort net if we
+      // exhaust retries.
+      if (isForgedWithoutBackingCall(modelText, toolCalls) && forgeRetries < MAX_FORGE_RETRIES) {
+        forgeRetries++;
+        logger.warn(
+          { forgeRetries, sample: modelText.slice(0, 200) },
+          "model forged a receipt with no backing tool call — forcing a tool call on retry",
+        );
+        messages.push({ role: "user", content: FORGED_RECEIPT_NUDGE });
+        forceToolUse = true;
+        continue;
+      }
+
+      const text = composeFinalText(modelText, toolCalls);
       return { text, toolCalls, usage: totals };
     }
 
@@ -137,6 +186,24 @@ export function stripModelReceipts(text: string): { remaining: string; strippedC
     );
   }
   return { remaining: kept.join("\n").trim(), strippedCount: stripped };
+}
+
+/**
+ * True when the model ended its turn having written a `✓ Captured/Updated/
+ * Dropped` line (a forgery — receipts are code-generated) while NO successful
+ * write tool ran in the turn to back it up. This is the silent-data-loss
+ * shape: the operator sees a confirmation (or, once stripped, an empty/meta
+ * message) for work that was never persisted. The loop uses this to trigger a
+ * forced-tool-call retry. A failed write tool counts as no backing call — the
+ * receipt is still unbacked, so we retry.
+ */
+export function isForgedWithoutBackingCall(
+  modelText: string,
+  toolCalls: ChiefOutput["toolCalls"],
+): boolean {
+  if (stripModelReceipts(modelText).strippedCount === 0) return false;
+  const hasBackingCall = toolCalls.some((c) => WRITE_TOOLS.has(c.name) && !c.is_error);
+  return !hasBackingCall;
 }
 
 /**
