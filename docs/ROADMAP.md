@@ -1,5 +1,7 @@
 # Roadmap
 
+> **Status (2026-05):** Phases 0–2 shipped — the system is **live in production** on Fly.io and in daily use. Two course-changes since this roadmap was first written: (1) the messaging channel pivoted from WhatsApp to **Telegram** after Meta blocked the Cloud API (WhatsApp code is parked, not deleted); (2) a **Linear** integration (read + write) was added — it wasn't in the original plan. The phases below are annotated to reflect that. Per-tool runtime docs live in [`docs/integrations/`](integrations/).
+
 ## Phase 0 — Scaffold ✅ (this commit)
 
 - Repo, vault template, schemas, templates
@@ -12,7 +14,7 @@
 - Cron scheduling in operator timezone
 - WhatsApp stub with correct interface
 
-## Phase 1 — Local working v1 (this week)
+## Phase 1 — Local working v1 ✅
 
 Goal: end-to-end CLI conversation commits real markdown to your vault.
 
@@ -28,7 +30,7 @@ Known things to iterate on in this phase:
 - Task deduplication — the current `create_task` doesn't check for near-duplicates.
 - A `complete_task` tool shortcut (currently `update_task` with `status=done`).
 
-## Phase 2 — Deployed & scheduled (week 2)
+## Phase 2 — Deployed & scheduled ✅
 
 - [ ] Create Fly.io account + app: `fly launch`
 - [ ] Attach persistent volume (3 GB) mounted at `/data`
@@ -38,21 +40,27 @@ Known things to iterate on in this phase:
 - [ ] Verify cron fires: check `/health`, tail logs at 07:00 local time
 - [ ] Set up Anthropic budget alert ($25/month hard cap recommended)
 
-## Phase 3 — WhatsApp two-way
+## Phase 3 — Messaging channel ✅ (Telegram, not WhatsApp)
 
-- [ ] Create a Meta for Developers account
-- [ ] Create a WhatsApp Business Account + app
-- [ ] Grab a **free test phone number** from Meta (limited to 5 recipients — your personal number is fine)
-- [ ] Set `WHATSAPP_*` env vars, toggle `WHATSAPP_ENABLED=true`
-- [ ] Add Meta's webhook URL: `https://<your-fly-app>.fly.dev/webhooks/whatsapp` with your `WHATSAPP_VERIFY_TOKEN`
-- [ ] Wire inbound payload parsing in `intake/http.ts::POST /webhooks/whatsapp`
-  - Extract `entry[0].changes[0].value.messages[0].text.body`
-  - Dispatch through `runChiefOfStaff`
-  - Reply via `messenger.send(..., 'whatsapp')`
-- [ ] Wire outbound daily brief to WhatsApp in `jobs/cron.ts`
-- [ ] Cost: **free** at personal-use volume (1000 service conversations/month included)
+Originally planned as WhatsApp two-way. Meta's risk system **blocked the new business portfolio's Cloud API access** after a few days of automated daily-brief traffic (`"API access blocked." code 200 OAuthException`). Rather than fight an opaque appeals process, the channel pivoted to **Telegram's Bot API** — free, public, no business-portfolio risk system.
 
-When you scale beyond the test number: apply for a production number through Meta directly or via an aggregator like 360dialog. No Twilio markup.
+What shipped instead:
+- Telegram two-way chat: inbound webhook (`/webhooks/telegram`, `secret_token` auth, chat-id filter, `update_id` dedupe) → Alfred → reply.
+- Outbound briefs/receipts via `messenger.send(..., 'telegram')`, with Markdown→HTML rendering and ISO-date humanizing.
+- WhatsApp code is **parked, not deleted** (`WHATSAPP_ENABLED=false`) — see the "unused but intentional" note in the handoff. Re-attempting WhatsApp would require moving to the BidaWash portfolio (which has account standing) and is not currently worth it over Telegram.
+
+Runtime detail: [`docs/integrations/telegram.md`](integrations/telegram.md).
+
+## Linear integration (added — not in the original plan)
+
+A task tracker projection of the actionable subset of the vault, for eventual team sharing. One team (`CNCL`) + five Projects; employees as labels; every bot-created issue assigned to the operator.
+
+- [x] **Phase 1 — read.** `list_tasks` queries vault + Linear and merges.
+- [x] **Phase 2 — write.** Capturing an actionable task mirrors to a Linear issue (priority/deadline/label/state/assignee) and writes `linear_id`/`linear_url` back into the vault; edits and drops propagate.
+- [ ] **Phase 3 — brief reads Linear.** The daily brief is still vault-only; it should read live Linear state (incl. teammate changes), merged + grouped by project.
+- [ ] **Phase 4 — migrate legacy tasks.** One-shot script: existing project-tagged vault tasks (pre-Phase-2) → create Linear issues, write back the cross-ref. Also decide whether `update_task` should mirror on a vault-only→actionable type change.
+
+Runtime detail: [`docs/integrations/linear.md`](integrations/linear.md).
 
 ## Phase 4 — Intelligence
 

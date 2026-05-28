@@ -75,7 +75,7 @@ Roughly in increasing order of how often you'll see them:
 | **Claude misclassifies** (defaults to wrong project, sets a P2 you'd call P1, etc.) | The receipt shows the wrong category. You can correct it with a follow-up message ("change priority to P1"). | Alfred's prompt + Claude itself |
 | **Tool execution fails** (vault disk full, GitHub temporarily unreachable, PAT revoked) | Alfred replies with an error message saying what failed. The task is NOT in the vault. You re-issue when the cause is resolved. | Tool dispatcher |
 | **Claude API outage** | The bot doesn't respond at all, or returns a generic error. Anthropic's status page tells you whether it's their problem. | Anthropic |
-| **Forging** (Claude says "✓ Captured" without actually creating the task) | Used to be a real risk. As of PR #14, **the system writes the receipt from real data, so this can't happen anymore**. The model could write a fake receipt line, but it gets stripped before you ever see it. | Eliminated |
+| **Forging** (Claude writes "✓ Captured" without actually creating the task) | The receipt you see is always synthesized from real tool data, never the model's prose — so a *fake* receipt never reaches you (PR #14). And if the model skips the tool call entirely, the loop now **forces a real tool call on a retry** (PR #23) so the task still lands. Only if that retry budget is exhausted do you get a visible `(Council) I claimed to capture…` notice — never silent loss. | Self-healing |
 | **GitHub PAT expires** | Vault writes start failing. You see "tool returned an error" on the next capture. Fix is to generate a new PAT and `fly secrets set VAULT_REMOTE=...`. | GitHub |
 | **Anthropic spend cap hit** | Bot stops responding mid-sentence or returns an error. You'd raise the cap in the Anthropic console. The cap is set to $25/month right now. | Anthropic |
 
@@ -265,12 +265,14 @@ The dispatcher's JSON return is wrapped in a `tool_result` block and appended to
 
 This is the structural anti-forging fix from PR #14. The model **does not** write `✓ Captured:` lines anymore. The system writes them, from real tool result data:
 
-1. For each tool call where `name in {create_task, update_task}` AND `is_error == false` AND the result JSON has a `task` field:
-   - Build `✓ Captured: <title> [<project> · <priority> · <deadline-or-"no deadline">]` (or `✓ Updated: ...`).
-2. `stripModelReceipts(modelText)` — unconditionally removes any line starting with `✓ Captured:` or `✓ Updated:` from the model's prose. If the model wrote one anyway (forgery attempt or duplicate), it's dropped, with a warning logged.
+1. For each tool call where `name in {create_task, update_task, delete_task}` AND `is_error == false` AND the result JSON has a `task` field:
+   - Build `✓ Captured: <title> [<project> · <priority> · <deadline-or-"no deadline">]` (or `✓ Updated: ...` / `✓ Dropped: ...`).
+2. `stripModelReceipts(modelText)` — unconditionally removes any line starting with `✓ Captured:`, `✓ Updated:`, or `✓ Dropped:` from the model's prose. If the model wrote one anyway (forgery attempt or duplicate), it's dropped, with a warning logged.
 3. Final text = `[receipts joined by newline]\n\n[stripped commentary]`.
 
 If the model wrote nothing useful and there are no commentary lines after stripping, just the receipts ship.
+
+**Before this point, the loop has already had a chance to self-heal.** PR #23 added forge recovery in `runChiefOfStaff`: if the model ends its turn having written a receipt line with **no successful write tool backing it**, the loop re-prompts and sets `tool_choice: { type: "any" }` on the retry — forcing a real tool call so the capture actually lands. `composeFinalText` therefore usually sees a genuine tool result. The `(Council) I claimed to capture…` fallback only ships if the retry budget (2) is exhausted — a visible failure, never a silent one.
 
 ### 10. Send to Telegram
 
@@ -398,13 +400,20 @@ Each boundary has its own credential, set as a Fly secret. Rotating any one does
 
 If `dispatchTool` throws, the outer try/catch in `dispatch.ts` returns `{ content: '{"ok":false,"error":...}', is_error: true }`. The model sees `is_error: true`, reports the failure to the operator. **No receipt is synthesized** for errored tool calls — `receiptFor` returns `null` if `call.is_error` is true.
 
-### Forging (eliminated)
+### Forging (mitigated + self-healing)
 
-Pre-PR #14: model could write `✓ Captured: ...` text without calling `create_task`. The Christian and Randy losses were this. Post-PR #14: receipts come from tool result data only. The model has no affordance to forge.
+Pre-PR #14: the model could write `✓ Captured: ...` text without calling `create_task`, and the operator believed the task was saved. The Christian and Randy losses were this.
 
-### Forge attempt (silently handled)
+This is fixed in two layers:
 
-If the model writes a `✓ Captured:` line anyway (drift, hallucination), `stripModelReceipts` removes it before send. A warning logs to `fly logs`. The user sees only the system-synthesized receipt (or nothing, if no real tool ran).
+1. **PR #14 — the receipt is never the model's.** Receipts come from real tool-result data only; any `✓ Captured/Updated/Dropped` line the model writes is stripped before send. So a *fake* receipt can never reach the operator.
+2. **PR #23 — the skipped tool call is recovered.** Stripping a forgery used to leave nothing, so the task was still lost (just with a meta-failure message instead of a fake receipt). Now, when the model forges a receipt with no backing write tool, the loop forces a real tool call on a retry (`tool_choice: any`, up to 2 retries) so the capture actually lands.
+
+Forging is intrinsic to how an LLM generates text — the most plausible reply often *is* the confirmation sentence — so it's mitigated, not eliminated. The code guard + forced-retry is the durable defense, not the prompt.
+
+### Forge attempt (handled, never silent)
+
+If the model writes a `✓ Captured:` line without the backing tool call, `stripModelReceipts` removes it and a warning logs to `fly logs`. The loop then re-prompts with a forced tool call so the work lands and the operator gets the genuine receipt. Only if the retry budget is exhausted does the operator see the visible `(Council) I claimed to capture or update something but didn't actually call the tool. Re-issue the request.` fallback. The empty-text guard in `sendTelegram` ensures the operator never gets a blank message either way.
 
 ### Cache miss
 

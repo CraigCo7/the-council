@@ -177,7 +177,7 @@ Docker's Alpine base lacks a musl prebuild, so it compiles from source. If the b
 
 These are intentionally deferred to later phases:
 
-- **WhatsApp delivery** (Phase 3) — webhook routes are stubbed but inbound parsing + Meta Cloud API outbound aren't wired.
+- **WhatsApp delivery** — *parked, not active.* The code (inbound parsing, HMAC verification, Meta Cloud API outbound) is fully built but disabled via `WHATSAPP_ENABLED=false`; Meta's risk system blocked Cloud API access for this portfolio. The **live messaging channel is Telegram** — set `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `TELEGRAM_WEBHOOK_SECRET` as secrets and register the webhook (`setWebhook` → `/webhooks/telegram`, with the secret). Runtime detail in [integrations/telegram.md](integrations/telegram.md).
 - **Email delivery fallback** — for now, read the daily brief in Obsidian on your phone via GitHub.
 - **Horizontal scale** — single machine is correct for personal use. Two machines would require external cron to avoid duplicate job fires.
 - **Database migrations framework** — SQLite schema is bootstrapped by `schema.sql` on startup; migrations will need real tooling if the schema ever changes in a non-additive way.
