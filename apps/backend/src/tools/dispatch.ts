@@ -17,7 +17,15 @@ import { listLinearIssues } from "../linear/listIssues.js";
 import { createLinearIssue, shouldMirrorToLinear } from "../linear/createIssue.js";
 import { updateLinearIssue } from "../linear/updateIssue.js";
 import { archiveLinearIssue } from "../linear/archiveIssue.js";
+import { updateLinearProject } from "../linear/updateProject.js";
 import { linearEnabled } from "../linear/client.js";
+import {
+  UpdateProjectInput,
+  changedFields,
+  readProject,
+  renderedBodySections,
+  updateProject,
+} from "../vault/projects.js";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 
@@ -274,6 +282,86 @@ const dispatchers: Record<string, Dispatcher> = {
             : null,
         })),
       ),
+    };
+  },
+
+  read_project: async (raw) => {
+    const parsed = z.object({ project: ProjectEnum }).parse(raw);
+    await syncPull();
+    const project = readProject(parsed.project);
+    if (!project) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          error: "project file not found",
+          project: parsed.project,
+        }),
+        is_error: true,
+      };
+    }
+    return {
+      content: JSON.stringify({
+        ok: true,
+        project: parsed.project,
+        frontmatter: project.frontmatter,
+        body: project.body,
+      }),
+    };
+  },
+
+  update_project: async (raw) => {
+    const parsed = UpdateProjectInput.parse(raw);
+    await syncPull();
+    const updated = updateProject(parsed);
+    if (!updated) {
+      return {
+        content: JSON.stringify({
+          ok: false,
+          error: "project file not found",
+          project: parsed.project,
+        }),
+        is_error: true,
+      };
+    }
+
+    // Mirror the same set of section patches into Linear's project
+    // description. Same non-fatal posture as the issue mirror: vault is
+    // canonical, Linear failure surfaces as `linear_warning` and the agent
+    // can flag it in commentary. Frontmatter-only patches (status, summary)
+    // produce no sections — Linear is left alone in that case.
+    let linearWarning: string | null = null;
+    let linearUrl: string | null = null;
+    if (linearEnabled()) {
+      const sections = renderedBodySections(parsed);
+      const result = await updateLinearProject(parsed.project, sections);
+      if (result.ok) {
+        linearUrl = result.url;
+      } else {
+        linearWarning = result.error;
+        logger.warn(
+          { project: parsed.project, error: result.error },
+          "linear project mirror failed — vault still committed",
+        );
+      }
+    }
+
+    const { committed, hash } = await commitAndPush(
+      [path.join(vaultPath(), updated.relPath)],
+      `project: update ${parsed.project}`,
+    );
+
+    // The `project` and `fields` payload powers the receipt synthesizer in
+    // chief-of-staff.ts (`✓ Project updated: <Project> [<fields>] [Linear](url)`).
+    return {
+      content: JSON.stringify({
+        ok: true,
+        project: parsed.project,
+        fields: changedFields(parsed),
+        committed,
+        hash,
+        linear_url: linearUrl,
+        linear_warning: linearWarning,
+      }),
     };
   },
 

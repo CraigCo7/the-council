@@ -128,6 +128,68 @@ export function toolDefinitions(): Anthropic.Tool[] {
       },
     },
     {
+      name: "read_project",
+      description:
+        "Read a project file from the vault — returns its frontmatter (status, summary, owner, created, updated) and its body Markdown (North star, Current focus, Blockers, Key people, Links sections). Use this BEFORE calling `update_project` when the operator describes a delta ('remove X, add Y') and you need to know the current state to compose the new full value.",
+      input_schema: {
+        type: "object",
+        properties: {
+          project: { type: "string", enum: projectEnum },
+        },
+        required: ["project"],
+      },
+    },
+    {
+      name: "update_project",
+      description:
+        "Update a project's metadata or body sections in the vault, and mirror the change into the corresponding Linear project's description. Use for personnel changes (key_people), status changes (active/paused/archived), or revisions to a project's north star / current focus / blockers / links. Pass only the fields you want to change; everything else is untouched. The system synthesizes a `✓ Project updated: ...` receipt from real tool data, so do NOT write that line yourself.",
+      input_schema: {
+        type: "object",
+        properties: {
+          project: { type: "string", enum: projectEnum },
+          status: {
+            type: "string",
+            enum: ["active", "paused", "archived"],
+            description: "Project lifecycle status (frontmatter).",
+          },
+          summary: {
+            type: "string",
+            description: "One-line project summary (frontmatter).",
+          },
+          north_star: {
+            type: "string",
+            description: "Body of the `## North star` section. Markdown.",
+          },
+          current_focus: {
+            type: "string",
+            description: "Body of the `## Current focus` section. Markdown.",
+          },
+          blockers: {
+            type: "string",
+            description: "Body of the `## Blockers` section. Markdown.",
+          },
+          key_people: {
+            type: "array",
+            description:
+              "Replaces the `## Key people` section. Structured — the system renders the bullets, you don't.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                role: { type: "string", description: "Optional role/title, e.g. 'Project Engineer'." },
+              },
+              required: ["name"],
+            },
+          },
+          links: {
+            type: "string",
+            description: "Body of the `## Links` section. Markdown.",
+          },
+        },
+        required: ["project"],
+      },
+    },
+    {
       name: "propose_approval",
       description:
         "Enqueue a destructive operation (delete, bulk update, overwrite) for operator approval. Returns an approval id.",
