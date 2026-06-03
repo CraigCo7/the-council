@@ -49,8 +49,12 @@ tags: [ops, compliance]
 waiting_on: null            # required if type=waiting-for
 links: []                   # [[wikilinks]]
 source: cli                 # chat | whatsapp | manual | system | cli | http
+linear_id: null             # cross-ref to mirrored Linear issue (e.g. CNCL-42), or null
+linear_url: null            # canonical Linear issue URL, or null
 ---
 ```
+
+The `linear_id` / `linear_url` fields link a task to its [Linear](integrations/linear.md) projection — populated when an actionable task is mirrored. See [integrations/obsidian.md](integrations/obsidian.md) for the full write flow.
 
 ## Priorities
 
@@ -81,4 +85,4 @@ Edits outside these markers survive regeneration. (v1 briefs are fully regenerat
 
 - **iOS**: [Working Copy](https://workingcopy.app) or [a-Shell](https://holzschu.github.io/a-Shell_iOS/) for git pull/push.
 - **Android**: [MGit](https://play.google.com/store/apps/details?id=com.manichord.mgit) or Termux.
-- Or just interact via WhatsApp (Phase 3) — the backend handles all vault I/O.
+- Or just interact via [Telegram](integrations/telegram.md) — the backend handles all vault I/O.
