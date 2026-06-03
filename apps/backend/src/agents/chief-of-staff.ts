@@ -13,22 +13,27 @@ const MAX_ITERATIONS = 8;
 // an id) before the real write. MAX_ITERATIONS still bounds the overall loop.
 const MAX_FORGE_RETRIES = 2;
 
-// Tools whose successful result is what a `✓ Captured/Updated/Dropped` receipt
-// is supposed to confirm. A forged receipt with none of these in the turn is a
-// claim about work that never happened.
-const WRITE_TOOLS = new Set(["create_task", "update_task", "delete_task"]);
+// Tools whose successful result is what a `✓ Captured/Updated/Dropped/Project
+// updated` receipt is supposed to confirm. A forged receipt with none of these
+// in the turn is a claim about work that never happened.
+const WRITE_TOOLS = new Set([
+  "create_task",
+  "update_task",
+  "delete_task",
+  "update_project",
+]);
 
 // Injected when the model ends its turn having written a confirmation line but
 // never calling the tool. The next request forces a tool call (tool_choice:
 // any), so the capture the operator asked for actually lands instead of being
 // silently dropped behind a fake receipt.
 const FORGED_RECEIPT_NUDGE =
-  "You wrote a confirmation line (✓ Captured / ✓ Updated / ✓ Dropped) but did NOT " +
-  "call the tool, so nothing was persisted — the confirmation is a fabrication. " +
-  "Call the correct tool now (create_task / update_task / delete_task) with the " +
-  "details you intended to record. If you must resolve a task id first, call " +
-  "list_tasks. Do not write the confirmation line yourself; the system writes it " +
-  "from the real tool result.";
+  "You wrote a confirmation line (✓ Captured / ✓ Updated / ✓ Dropped / ✓ Project updated) " +
+  "but did NOT call the tool, so nothing was persisted — the confirmation is a fabrication. " +
+  "Call the correct tool now (create_task / update_task / delete_task / update_project) " +
+  "with the details you intended to record. If you must resolve a task id first, call " +
+  "list_tasks. Do not write the confirmation line yourself; the system writes it from " +
+  "the real tool result.";
 
 export type ChiefInput = {
   userMessage: string;
@@ -172,7 +177,8 @@ export function stripModelReceipts(text: string): { remaining: string; strippedC
     if (
       trimmed.startsWith("✓ Captured:") ||
       trimmed.startsWith("✓ Updated:") ||
-      trimmed.startsWith("✓ Dropped:")
+      trimmed.startsWith("✓ Dropped:") ||
+      trimmed.startsWith("✓ Project updated:")
     ) {
       stripped++;
       continue;
@@ -220,6 +226,14 @@ export function isForgedWithoutBackingCall(
  */
 export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | null {
   if (call.is_error) return null;
+
+  // Project updates use a different result shape (project + fields, not task),
+  // so they get their own receipt branch. Format:
+  //   ✓ Project updated: <Project> [<fields>] [Linear](url)
+  if (call.name === "update_project") {
+    return projectUpdateReceipt(call.result);
+  }
+
   if (
     call.name !== "create_task" &&
     call.name !== "update_task" &&
@@ -267,6 +281,48 @@ export function receiptFor(call: ChiefOutput["toolCalls"][number]): string | nul
   // failed somehow), include it bare so the operator at least sees it.
   if (linearId && linearUrl) return `${base} [${linearId}](${linearUrl})`;
   if (linearId) return `${base} ${linearId}`;
+  return base;
+}
+
+/**
+ * Build a receipt for a successful `update_project` tool result. Returns null
+ * for errors, malformed payloads, or no-op patches (where nothing actually
+ * changed). Format:
+ *
+ *   ✓ Project updated: <Project> [<fields>] ([Linear](url))
+ *
+ * `fields` is the comma-joined list of patched field names (e.g. `key_people,
+ * status`) so the operator can see at a glance what changed. The Linear link
+ * is appended in parentheses when the Linear mirror succeeded.
+ */
+function projectUpdateReceipt(resultJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resultJson);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const r = parsed as {
+    ok?: boolean;
+    project?: string;
+    fields?: unknown;
+    linear_url?: string | null;
+  };
+  if (!r.ok || !r.project) return null;
+  const project = String(r.project).trim();
+  if (!project) return null;
+
+  const fields = Array.isArray(r.fields)
+    ? r.fields.map((f) => String(f)).filter((f) => f.length > 0)
+    : [];
+  // No-op patch (only `project` passed, nothing else): nothing to confirm.
+  // Returning null keeps the operator from seeing an empty `[]` receipt.
+  if (fields.length === 0) return null;
+
+  const base = `✓ Project updated: ${project} [${fields.join(", ")}]`;
+  const linearUrl = r.linear_url ? String(r.linear_url).trim() : "";
+  if (linearUrl) return `${base} ([Linear](${linearUrl}))`;
   return base;
 }
 

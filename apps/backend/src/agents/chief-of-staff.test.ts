@@ -366,6 +366,79 @@ describe("composeFinalText", () => {
   });
 });
 
+describe("receiptFor — update_project", () => {
+  const projectUpdate = (overrides: Partial<Record<string, unknown>> = {}): ToolCall => ({
+    name: "update_project",
+    input: {},
+    result: JSON.stringify({
+      ok: true,
+      project: "BidaWash",
+      fields: ["key_people", "status"],
+      committed: true,
+      hash: "abc123",
+      linear_url: null,
+      linear_warning: null,
+      ...overrides,
+    }),
+    is_error: false,
+  });
+
+  it("renders the project, the fields patched, and no Linear suffix when url is null", () => {
+    expect(receiptFor(projectUpdate())).toBe(
+      "✓ Project updated: BidaWash [key_people, status]",
+    );
+  });
+
+  it("appends a parenthesized Linear link when the mirror succeeded with a url", () => {
+    expect(
+      receiptFor(
+        projectUpdate({ linear_url: "https://linear.app/the-council-alfred/project/bidawash-123" }),
+      ),
+    ).toBe(
+      "✓ Project updated: BidaWash [key_people, status] ([Linear](https://linear.app/the-council-alfred/project/bidawash-123))",
+    );
+  });
+
+  it("returns null when fields is empty (no-op patch, only `project` passed)", () => {
+    expect(receiptFor(projectUpdate({ fields: [] }))).toBeNull();
+  });
+
+  it("returns null on errored update_project (no receipt for failed work)", () => {
+    expect(
+      receiptFor({
+        name: "update_project",
+        input: {},
+        result: JSON.stringify({ ok: false, error: "project file not found" }),
+        is_error: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null on malformed JSON", () => {
+    expect(
+      receiptFor({ name: "update_project", input: {}, result: "not json", is_error: false }),
+    ).toBeNull();
+  });
+
+  it("stripModelReceipts strips a forged `✓ Project updated:` line", () => {
+    const r = stripModelReceipts("✓ Project updated: BidaWash [key_people]");
+    expect(r.remaining).toBe("");
+    expect(r.strippedCount).toBe(1);
+  });
+
+  it("isForgedWithoutBackingCall fires when project receipt is forged with no backing tool", () => {
+    expect(
+      isForgedWithoutBackingCall("✓ Project updated: BidaWash [key_people]", []),
+    ).toBe(true);
+  });
+
+  it("isForgedWithoutBackingCall is false when a successful update_project backs the receipt", () => {
+    expect(
+      isForgedWithoutBackingCall("✓ Project updated: BidaWash [key_people]", [projectUpdate()]),
+    ).toBe(false);
+  });
+});
+
 describe("isForgedWithoutBackingCall", () => {
   it("is true when a receipt was written but no tool ran", () => {
     expect(isForgedWithoutBackingCall("✓ Captured: Buy milk", [])).toBe(true);
